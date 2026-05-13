@@ -6,7 +6,7 @@ Premium launch MVP for a private, reference-only lifestyle experiences brand.
 
 - Next.js App Router, TypeScript, Tailwind CSS
 - Prisma ORM with Neon PostgreSQL
-- Better Auth with Google OAuth
+- Custom email/password auth with approved-member sessions
 - Nodemailer with Hostinger SMTP
 - Vercel hosting
 
@@ -21,18 +21,15 @@ cp .env.example .env
 2. Fill the required values:
 
 ```bash
-DATABASE_URL=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-BETTER_AUTH_SECRET=
-BETTER_AUTH_URL=http://localhost:3000
-SMTP_HOST=
+DATABASE_URL="postgresql://user:password@localhost:5432/curated_life?schema=public"
+ADMIN_EMAILS="founder@example.com"
+ADMIN_NOTIFICATION_EMAIL="thecuratedlife.india@gmail.com"
+SMTP_HOST=""
 SMTP_PORT=465
-SMTP_USER=
-SMTP_PASSWORD=
+SMTP_USER=""
+SMTP_PASSWORD=""
 EMAIL_FROM="The Curated Life <hello@thecuratedlife.in>"
-ADMIN_EMAILS=founder@example.com
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 ```
 
 3. Generate Prisma Client and deploy the schema:
@@ -54,8 +51,8 @@ npm run dev
 1. Public visitors request access at `/request-access`.
 2. Requests save as `PENDING` and receive a receipt email.
 3. Admins listed in `ADMIN_EMAILS` review at `/admin`.
-4. Approval creates or updates a member profile and sends the login link.
-5. Approved members log in through Google at `/login`.
+4. Approval creates or updates a member profile and sends a password setup link.
+5. Approved members set a password, then log in with email and password at `/login`.
 6. Members use `/member` for invitations, reservations, and warm referrals.
 
-Google OAuth alone never grants access. The server checks the approved user record before creating private sessions.
+Login alone never grants access. The server checks the approved user record before creating private sessions.
