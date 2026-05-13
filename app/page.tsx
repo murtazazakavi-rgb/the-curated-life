@@ -59,14 +59,17 @@ export default async function Home() {
               real Mumbai places, trusted hosts, and introductions that feel
               considered rather than crowded.
             </p>
-            <div className="cta-row">
+            <div className="cta-row hero-actions">
               <Link className="btn btn--cream" href="/request-access">
                 Request Access <span className="arrow" />
               </Link>
-              <Link className="btn btn--ghost-light" href="#experiences">
-                View Experiences <span className="arrow" />
+              <Link className="btn btn--ghost-light" href="/login">
+                Member Login <span className="arrow" />
               </Link>
             </div>
+            <Link className="hero-secondary-link" href="#experiences">
+              View upcoming experiences
+            </Link>
           </div>
         </section>
 
@@ -78,50 +81,9 @@ export default async function Home() {
           </div>
         </div>
 
-        <section className="section" aria-labelledby="positioning">
+        <section id="experiences" className="section section--dark section--first" aria-labelledby="experiences-title">
           <div className="wrap">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Reference-only</p>
-                <h2 id="positioning" className="section-title">
-                  Access is <em>personal.</em>
-                </h2>
-              </div>
-              <p className="section-copy">
-                The Curated Life is not an open booking platform. People apply first,
-                every request is reviewed personally, and access is granted manually so
-                each room can stay warm, intentional, and human in scale.
-              </p>
-            </div>
-            <div className="editorial-grid">
-              <article className="editorial-note">
-                <h3>Small by design</h3>
-                <p>
-                  Experiences are intimate, paced, and curated around the people in the
-                  room instead of around volume.
-                </p>
-              </article>
-              <article className="editorial-note">
-                <h3>Trusted hosts</h3>
-                <p>
-                  Some gatherings are founder-led. Others are hosted by thoughtful
-                  members or partner hosts we personally trust.
-                </p>
-              </article>
-              <article className="editorial-note">
-                <h3>Quiet correspondence</h3>
-                <p>
-                  Invitations, confirmations, and details arrive by email. No public
-                  checkout, no noisy feeds, no launch-day clutter.
-                </p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <section id="experiences" className="section section--dark" aria-labelledby="experiences-title">
-          <div className="wrap">
-            <div className="section-head">
+            <div className="section-head compact-section-head">
               <div>
                 <p className="eyebrow on-dark">Upcoming</p>
                 <h2 id="experiences-title" className="section-title">
@@ -163,9 +125,50 @@ export default async function Home() {
           </div>
         </section>
 
-        <section id="access" className="section" aria-labelledby="access-title">
+        <section className="section section--tight" aria-labelledby="positioning">
           <div className="wrap">
-            <div className="section-head">
+            <div className="section-head compact-section-head">
+              <div>
+                <p className="eyebrow">Reference-only</p>
+                <h2 id="positioning" className="section-title">
+                  Access is <em>personal.</em>
+                </h2>
+              </div>
+              <p className="section-copy">
+                The Curated Life is not an open booking platform. People apply first,
+                every request is reviewed personally, and access is granted manually so
+                each room can stay warm, intentional, and human in scale.
+              </p>
+            </div>
+            <div className="editorial-grid">
+              <article className="editorial-note">
+                <h3>Small by design</h3>
+                <p>
+                  Experiences are intimate, paced, and curated around the people in the
+                  room instead of around volume.
+                </p>
+              </article>
+              <article className="editorial-note">
+                <h3>Trusted hosts</h3>
+                <p>
+                  Some gatherings are founder-led. Others are hosted by thoughtful
+                  members or partner hosts we personally trust.
+                </p>
+              </article>
+              <article className="editorial-note">
+                <h3>Quiet correspondence</h3>
+                <p>
+                  Invitations, confirmations, and details arrive by email. No public
+                  checkout, no noisy feeds, no launch-day clutter.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="access" className="section section--tight" aria-labelledby="access-title">
+          <div className="wrap">
+            <div className="section-head compact-section-head">
               <div>
                 <p className="eyebrow">How access works</p>
                 <h2 id="access-title" className="section-title">
@@ -173,7 +176,7 @@ export default async function Home() {
                 </h2>
               </div>
             </div>
-            <div className="step-grid">
+            <div className="step-grid compact-steps">
               <article className="step">
                 <p className="step__num">01</p>
                 <h3>Request access</h3>
@@ -217,7 +220,7 @@ export default async function Home() {
                 Begin Request <span className="arrow" />
               </Link>
               <Link className="btn btn--ghost-light" href="/login">
-                Approved Member Login <span className="arrow" />
+                Member Login <span className="arrow" />
               </Link>
             </div>
           </div>
