@@ -37,3 +37,31 @@ export async function PATCH(
 
   return NextResponse.json({ ok: true, experience });
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const admin = await getAuthorizedAdmin();
+
+  if (!admin) {
+    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  }
+
+  const { id } = await context.params;
+  const prisma = getPrisma();
+  const reservationCount = await prisma.reservation.count({
+    where: { experienceId: id },
+  });
+
+  if (reservationCount > 0) {
+    return NextResponse.json(
+      { error: "This event has reservations. Archive it instead of deleting it." },
+      { status: 409 },
+    );
+  }
+
+  await prisma.experience.delete({ where: { id } });
+
+  return NextResponse.json({ ok: true });
+}

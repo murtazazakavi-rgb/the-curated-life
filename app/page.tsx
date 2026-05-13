@@ -4,8 +4,30 @@ import { ExperienceCard } from "@/components/home/ExperienceCard";
 import { Footer } from "@/components/home/Footer";
 import { SiteHeader } from "@/components/home/SiteHeader";
 import { curatedExperiences } from "@/lib/data/experiences";
+import { getPrisma } from "@/lib/prisma/client";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const experiences = process.env.DATABASE_URL
+    ? await getPrisma().experience.findMany({
+        where: {
+          isVisible: true,
+          isArchived: false,
+          dateTime: { gte: new Date() },
+        },
+        orderBy: { dateTime: "asc" },
+      })
+    : curatedExperiences
+        .filter(
+          (experience) =>
+            experience.isVisible && new Date(experience.dateTime) >= new Date(),
+        )
+        .sort(
+          (first, second) =>
+            new Date(first.dateTime).getTime() - new Date(second.dateTime).getTime(),
+        );
+
   const marqueeItems = [
     "Private invitations",
     "Personally reviewed",
@@ -112,9 +134,31 @@ export default function Home() {
               </p>
             </div>
             <div className="experience-grid">
-              {curatedExperiences.map((experience) => (
-                <ExperienceCard key={experience.slug} experience={experience} />
-              ))}
+              {experiences.length ? (
+                experiences.map((experience) => (
+                  <ExperienceCard
+                    key={experience.slug}
+                    experience={{
+                      ...experience,
+                      dateTime:
+                        typeof experience.dateTime === "string"
+                          ? experience.dateTime
+                          : experience.dateTime.toISOString(),
+                      hostTitle: experience.hostTitle ?? undefined,
+                      hostBio: experience.hostBio ?? undefined,
+                      seatsTotal: experience.seatsTotal ?? undefined,
+                    }}
+                  />
+                ))
+              ) : (
+                <article className="editorial-note" style={{ gridColumn: "1 / -1" }}>
+                  <h3>New invitations are being composed.</h3>
+                  <p>
+                    The next visible experiences will appear here once the calendar is
+                    ready for approved members and new applicants to review.
+                  </p>
+                </article>
+              )}
             </div>
           </div>
         </section>
@@ -150,8 +194,8 @@ export default function Home() {
                 <p className="step__num">03</p>
                 <h3>Member entry</h3>
                 <p>
-                  Approved members log in with Google, view private invitations, reserve
-                  places, and refer thoughtful people by email.
+                  Approved members log in with email and password, view private
+                  invitations, reserve places, and refer thoughtful people by email.
                 </p>
               </article>
             </div>

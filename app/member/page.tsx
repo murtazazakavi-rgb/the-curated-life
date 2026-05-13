@@ -12,7 +12,11 @@ export default async function MemberPage() {
 
   const [experiences, reservations, referrals] = await Promise.all([
     prisma.experience.findMany({
-      where: { isVisible: true },
+      where: {
+        isVisible: true,
+        isArchived: false,
+        dateTime: { gte: new Date() },
+      },
       orderBy: { dateTime: "asc" },
     }),
     prisma.reservation.findMany({

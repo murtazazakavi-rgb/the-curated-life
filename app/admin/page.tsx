@@ -2,6 +2,7 @@ import { AdminConsole } from "@/components/admin/AdminConsole";
 import { Footer } from "@/components/home/Footer";
 import { SiteHeader } from "@/components/home/SiteHeader";
 import { requireAdmin } from "@/lib/auth/server";
+import { ReservationStatus } from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -10,30 +11,45 @@ export default async function AdminPage() {
   await requireAdmin();
   const prisma = getPrisma();
 
-  const [requests, experiences, reservations, referrals] = await Promise.all([
-    prisma.accessRequest.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-    prisma.experience.findMany({
-      orderBy: { dateTime: "asc" },
-    }),
-    prisma.reservation.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: true,
-        experience: true,
-      },
-      take: 50,
-    }),
-    prisma.referral.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        referrer: true,
-      },
-      take: 50,
-    }),
-  ]);
+  const [requests, experiences, reservations, referrals, members, emailLogs] =
+    await Promise.all([
+      prisma.accessRequest.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      prisma.experience.findMany({
+        orderBy: { dateTime: "asc" },
+        include: {
+          reservations: {
+            where: { status: ReservationStatus.CONFIRMED },
+            select: { id: true },
+          },
+        },
+      }),
+      prisma.reservation.findMany({
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: true,
+          experience: true,
+        },
+        take: 50,
+      }),
+      prisma.referral.findMany({
+        orderBy: { createdAt: "desc" },
+        include: {
+          referrer: true,
+        },
+        take: 50,
+      }),
+      prisma.user.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+      prisma.emailLog.findMany({
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+    ]);
 
   return (
     <div className="page-shell">
@@ -50,6 +66,9 @@ export default async function AdminPage() {
             preferredExperiences: request.preferredExperiences,
             message: request.message,
             status: request.status,
+            reviewedAt: request.reviewedAt?.toISOString() ?? null,
+            reviewedById: request.reviewedById,
+            adminNote: request.adminNote,
             createdAt: request.createdAt.toISOString(),
           }))}
           experiences={experiences.map((experience) => ({
@@ -67,6 +86,15 @@ export default async function AdminPage() {
             seatsTotal: experience.seatsTotal,
             isVisible: experience.isVisible,
             isInviteOnly: experience.isInviteOnly,
+            isArchived: experience.isArchived,
+            confirmedCount: experience.reservations.length,
+            remainingSeats:
+              experience.seatsTotal === null
+                ? null
+                : Math.max(
+                    experience.seatsTotal - experience.reservations.length,
+                    0,
+                  ),
           }))}
           reservations={reservations.map((reservation) => ({
             id: reservation.id,
@@ -75,6 +103,7 @@ export default async function AdminPage() {
             memberName: reservation.user.fullName,
             memberEmail: reservation.user.email,
             experienceTitle: reservation.experience.title,
+            seatsTotal: reservation.experience.seatsTotal,
           }))}
           referrals={referrals.map((referral) => ({
             id: referral.id,
@@ -83,6 +112,24 @@ export default async function AdminPage() {
             relationship: referral.relationship,
             status: referral.status,
             referrerName: referral.referrer.fullName,
+          }))}
+          members={members.map((member) => ({
+            id: member.id,
+            fullName: member.fullName,
+            email: member.email,
+            role: member.role,
+            accessStatus: member.accessStatus,
+            passwordSetAt: member.passwordSetAt?.toISOString() ?? null,
+            suspendedAt: member.suspendedAt?.toISOString() ?? null,
+            createdAt: member.createdAt.toISOString(),
+          }))}
+          emailLogs={emailLogs.map((log) => ({
+            id: log.id,
+            toEmail: log.toEmail,
+            templateKey: log.templateKey,
+            status: log.status,
+            providerMessageId: log.providerMessageId,
+            createdAt: log.createdAt.toISOString(),
           }))}
         />
       </main>

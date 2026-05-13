@@ -40,20 +40,25 @@ enum EmailStatus {
 }
 
 model User {
-  id            String            @id @default(cuid())
-  email         String            @unique
-  emailVerified Boolean           @default(false)
-  fullName      String
-  avatarUrl     String?
-  accessStatus  AccessStatus      @default(PENDING)
-  role          UserRole          @default(MEMBER)
-  referredBy    String?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  sessions      Session[]
-  accounts      Account[]
-  reservations  Reservation[]
-  referrals     Referral[]
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  emailVerified       Boolean              @default(false)
+  fullName            String
+  avatarUrl           String?
+  passwordHash        String?
+  passwordSetAt       DateTime?
+  suspendedAt         DateTime?
+  accessStatus        AccessStatus         @default(PENDING)
+  role                UserRole             @default(MEMBER)
+  referredBy          String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  sessions            Session[]
+  accounts            Account[]
+  passwordSetupTokens PasswordSetupToken[]
+  passwordResetTokens PasswordResetToken[]
+  reservations        Reservation[]
+  referrals           Referral[]
 
   @@map("user")
 }
@@ -114,7 +119,10 @@ model AccessRequest {
   message              String
   status               AccessStatus @default(PENDING)
   reviewedAt           DateTime?
+  reviewedById         String?
+  adminNote            String?
   createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
 
   @@index([email])
   @@index([status])
@@ -135,10 +143,13 @@ model Experience {
   seatsTotal    Int?
   isVisible     Boolean       @default(true)
   isInviteOnly  Boolean       @default(true)
+  isArchived    Boolean       @default(false)
   createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   reservations  Reservation[]
 
   @@index([isVisible])
+  @@index([isArchived])
   @@index([dateTime])
 }
 
@@ -180,4 +191,41 @@ model EmailLog {
 
   @@index([toEmail])
   @@index([templateKey])
+}
+
+model PasswordSetupToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model AdminNote {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  note       String
+  createdBy  String
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
 }

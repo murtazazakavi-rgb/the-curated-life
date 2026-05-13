@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { requestReceivedEmail } from "@/components/emails/templates";
+import {
+  accessRequestReceivedEmail,
+  adminNewAccessRequestEmail,
+} from "@/lib/email/templates";
 import { sendTransactionalEmail } from "@/lib/email/send";
+import { siteUrl } from "@/lib/email/templates/base";
 import { getPrisma } from "@/lib/prisma/client";
 import { requestAccessSchema } from "@/lib/validators/access";
 
@@ -31,14 +35,35 @@ export async function POST(request: Request) {
     },
   });
 
-  const email = requestReceivedEmail(data.full_name);
+  const email = accessRequestReceivedEmail(data.full_name);
 
   await sendTransactionalEmail({
     to: data.email,
-    templateKey: "request_received",
+    templateKey: "access_request_received",
     ...email,
   }).catch((error) => {
     console.error("request_received email failed", error);
+  });
+
+  const adminEmailAddress =
+    process.env.ADMIN_NOTIFICATION_EMAIL || "thecuratedlife.india@gmail.com";
+  const adminEmail = adminNewAccessRequestEmail({
+    fullName: data.full_name,
+    email: data.email,
+    phone: data.phone,
+    referredBy: data.referred_by,
+    interests: data.interests,
+    preferredExperiences: data.preferred_experiences,
+    message: data.message,
+    reviewUrl: siteUrl("/admin"),
+  });
+
+  await sendTransactionalEmail({
+    to: adminEmailAddress,
+    templateKey: "admin_new_access_request",
+    ...adminEmail,
+  }).catch((error) => {
+    console.error("admin_new_access_request email failed", error);
   });
 
   return NextResponse.json({ ok: true });

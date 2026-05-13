@@ -40,7 +40,8 @@ export const reservationSchema = z.object({
 });
 
 export const accessDecisionSchema = z.object({
-  action: z.enum(["approve", "decline", "waitlist"]),
+  action: z.enum(["approve", "decline", "waitlist", "resend_setup"]),
+  adminNote: z.string().trim().max(1200).optional().or(z.literal("")),
 });
 
 export const experienceAdminSchema = z.object({
@@ -49,7 +50,14 @@ export const experienceAdminSchema = z.object({
   description: z.string().trim().min(12).max(1200),
   location: z.string().trim().min(2).max(180),
   dateTime: z.string().trim().min(8),
-  imageUrl: z.string().trim().url().max(1200),
+  imageUrl: z
+    .string()
+    .trim()
+    .max(1200)
+    .refine(
+      (value) => value.startsWith("/") || z.url().safeParse(value).success,
+      "Enter a valid image URL or local image path.",
+    ),
   hostedByLabel: z.string().trim().min(2).max(180),
   hostName: z.string().trim().min(2).max(180),
   hostTitle: z.string().trim().max(180).optional().or(z.literal("")),
@@ -57,4 +65,23 @@ export const experienceAdminSchema = z.object({
   seatsTotal: z.number().int().positive().max(500).optional().nullable(),
   isVisible: z.boolean(),
   isInviteOnly: z.boolean(),
+  isArchived: z.boolean().optional(),
+});
+
+export const loginSchema = z.object({
+  email: z.string().trim().email().max(180).transform((value) => value.toLowerCase()),
+  password: z.string().min(1).max(256),
+});
+
+export const passwordTokenSchema = z.object({
+  token: z.string().trim().min(24).max(256),
+  password: z.string().min(8).max(256),
+});
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().trim().email().max(180).transform((value) => value.toLowerCase()),
+});
+
+export const reservationDecisionSchema = z.object({
+  status: z.enum(["CONFIRMED", "WAITLISTED", "CANCELLED"]),
 });

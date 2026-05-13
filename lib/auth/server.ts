@@ -1,144 +1,120 @@
-import { betterAuth } from "better-auth";
-import { APIError } from "better-auth/api";
-import { prismaAdapter } from "better-auth/adapters/prisma";
-import { headers } from "next/headers";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import type { NextResponse } from "next/server";
 import { AccessStatus, UserRole } from "@/lib/generated/prisma/enums";
 import { isAdminEmail } from "@/lib/admin/access";
 import { getPrisma } from "@/lib/prisma/client";
 
-function createAuthInstance() {
-  const prisma = getPrisma();
-  const siteUrl =
-    process.env.BETTER_AUTH_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    "http://localhost:3000";
+export const SESSION_COOKIE_NAME = "curated_life_session";
+const SESSION_DAYS = 30;
 
-  return betterAuth({
-    secret: process.env.BETTER_AUTH_SECRET,
-    baseURL: siteUrl,
-    trustedOrigins: [siteUrl, "http://localhost:3000", "http://localhost:3001"],
-    database: prismaAdapter(prisma, {
-      provider: "postgresql",
-    }),
-    socialProviders: {
-      google: {
-        clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-        prompt: "select_account",
-        disableImplicitSignUp: true,
-      },
+function hashSessionToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function createRawSessionToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+function sessionExpiresAt() {
+  return new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+}
+
+export function sessionCookieOptions(expires: Date) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    expires,
+  };
+}
+
+export async function createSessionForUser(userId: string, response: NextResponse) {
+  const rawToken = createRawSessionToken();
+  const expiresAt = sessionExpiresAt();
+  const headerStore = await headers();
+
+  await getPrisma().session.create({
+    data: {
+      id: randomUUID(),
+      userId,
+      token: hashSessionToken(rawToken),
+      expiresAt,
+      ipAddress:
+        headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        headerStore.get("x-real-ip"),
+      userAgent: headerStore.get("user-agent"),
     },
-    account: {
-      accountLinking: {
-        enabled: true,
-        trustedProviders: ["google"],
-      },
-    },
-    user: {
-      fields: {
-        name: "fullName",
-        image: "avatarUrl",
-      },
-      additionalFields: {
-        accessStatus: {
-          type: "string",
-          required: false,
-        },
-        role: {
-          type: "string",
-          required: false,
-        },
-        referredBy: {
-          type: "string",
-          required: false,
-        },
-      },
-    },
-    databaseHooks: {
-      user: {
-        create: {
-          before: async (user) => {
-            const email = user.email.toLowerCase();
-            const approvedRequest = await prisma.accessRequest.findFirst({
-              where: {
-                email,
-                status: AccessStatus.APPROVED,
-              },
-            });
+  });
 
-            if (!approvedRequest && !isAdminEmail(email)) {
-              throw new APIError("FORBIDDEN", {
-                message: "Access has not yet been granted.",
-              });
-            }
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    rawToken,
+    sessionCookieOptions(expiresAt),
+  );
+}
 
-            return {
-              data: {
-                ...user,
-                email,
-                accessStatus: AccessStatus.APPROVED,
-                role: isAdminEmail(email) ? UserRole.ADMIN : UserRole.MEMBER,
-              },
-            };
-          },
-        },
-      },
-      session: {
-        create: {
-          before: async (session) => {
-            const user = await prisma.user.findUnique({
-              where: { id: session.userId },
-              select: {
-                email: true,
-                accessStatus: true,
-              },
-            });
-
-            if (
-              !user ||
-              (user.accessStatus !== AccessStatus.APPROVED && !isAdminEmail(user.email))
-            ) {
-              throw new APIError("FORBIDDEN", {
-                message: "Access has not yet been granted.",
-              });
-            }
-
-            return { data: session };
-          },
-        },
-      },
-    },
+export function clearSessionCookie(response: NextResponse) {
+  response.cookies.set(SESSION_COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
   });
 }
 
-type AuthInstance = ReturnType<typeof createAuthInstance>;
+export async function deleteCurrentSession() {
+  const cookieStore = await cookies();
+  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
-let authInstance: AuthInstance | null = null;
+  if (!rawToken) return;
 
-export function getAuth() {
-  if (authInstance) return authInstance;
-
-  const auth = createAuthInstance();
-  authInstance = auth;
-  return auth;
+  await getPrisma().session
+    .deleteMany({
+      where: { token: hashSessionToken(rawToken) },
+    })
+    .catch(() => undefined);
 }
 
 export async function getSession() {
-  return getAuth().api.getSession({
-    headers: await headers(),
+  const cookieStore = await cookies();
+  const rawToken = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+
+  if (!rawToken) return null;
+
+  const session = await getPrisma().session.findUnique({
+    where: { token: hashSessionToken(rawToken) },
+    include: { user: true },
   });
+
+  if (!session || session.expiresAt <= new Date()) {
+    return null;
+  }
+
+  return session;
 }
 
 export async function getCurrentUser() {
   const session = await getSession();
-  if (!session?.user?.email) return null;
+  return session?.user ?? null;
+}
 
-  return getPrisma().user.findUnique({
-    where: {
-      email: session.user.email.toLowerCase(),
-    },
-  });
+function hasApprovedAccess(user: {
+  email: string;
+  accessStatus: AccessStatus;
+  suspendedAt?: Date | null;
+}) {
+  return (
+    !user.suspendedAt &&
+    (user.accessStatus === AccessStatus.APPROVED || isAdminEmail(user.email))
+  );
+}
+
+export function destinationForUser(user: { email: string; role: UserRole }) {
+  return isAdminEmail(user.email) || user.role === UserRole.ADMIN ? "/admin" : "/member";
 }
 
 export async function requireApprovedMember() {
@@ -148,7 +124,7 @@ export async function requireApprovedMember() {
     redirect("/login");
   }
 
-  if (user.accessStatus !== AccessStatus.APPROVED && !isAdminEmail(user.email)) {
+  if (!hasApprovedAccess(user)) {
     redirect("/login?status=not-granted");
   }
 
@@ -168,7 +144,7 @@ export async function requireAdmin() {
 export async function getAuthorizedMember() {
   const user = await getCurrentUser();
 
-  if (!user || (user.accessStatus !== AccessStatus.APPROVED && !isAdminEmail(user.email))) {
+  if (!user || !hasApprovedAccess(user)) {
     return null;
   }
 

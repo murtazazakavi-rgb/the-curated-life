@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, type FormEvent } from "react";
-import { authClient } from "@/lib/auth/client";
 import { formatExperienceDate } from "@/lib/data/experiences";
 
 type ExperienceView = {
@@ -86,6 +85,32 @@ export function MemberDashboard({
     setMessage("Reservation request received.");
   }
 
+  async function cancelReservation(reservationId: string) {
+    setMessage("");
+
+    const response = await fetch("/api/reservations", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservation_id: reservationId }),
+    });
+
+    const payload = await response.json();
+
+    if (!response.ok) {
+      setMessage(payload.error ?? "We could not cancel that reservation.");
+      return;
+    }
+
+    setReservationState((current) =>
+      current.map((reservation) =>
+        reservation.id === reservationId
+          ? { ...reservation, status: payload.reservation.status }
+          : reservation,
+      ),
+    );
+    setMessage("Reservation cancelled.");
+  }
+
   async function submitReferral(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setReferralMessage("");
@@ -117,13 +142,10 @@ export function MemberDashboard({
   }
 
   async function signOut() {
-    await authClient.signOut({
-      fetchOptions: {
-        onSuccess: () => {
-          window.location.href = "/";
-        },
-      },
+    await fetch("/api/auth/logout", {
+      method: "POST",
     });
+    window.location.href = "/";
   }
 
   return (
@@ -159,7 +181,7 @@ export function MemberDashboard({
                 <p className="member-card__meta">{member.email}</p>
               </div>
               <p className="member-card__meta">
-                Access holder · Verified by Google · Private invitations
+                Access holder · Email verified · Private invitations
               </p>
               <button className="btn btn--cream btn--full" type="button" onClick={signOut}>
                 Sign Out
@@ -186,6 +208,9 @@ export function MemberDashboard({
           <div className="stack">
             {experiences.map((experience) => {
               const reservationStatus = reservationsByExperience.get(experience.id);
+              const reservation = reservationState.find(
+                (item) => item.experienceId === experience.id,
+              );
 
               return (
                 <article className="invite-card" key={experience.id}>
@@ -213,6 +238,15 @@ export function MemberDashboard({
                     {reservationStatus ? "Request Received" : "Reserve Place"}
                     <span className="arrow" />
                   </button>
+                  {reservation && reservation.status !== "CANCELLED" ? (
+                    <button
+                      className="small-button secondary"
+                      type="button"
+                      onClick={() => cancelReservation(reservation.id)}
+                    >
+                      Cancel reservation
+                    </button>
+                  ) : null}
                 </article>
               );
             })}
