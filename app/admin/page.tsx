@@ -21,8 +21,7 @@ export default async function AdminPage() {
         orderBy: { dateTime: "asc" },
         include: {
           reservations: {
-            where: { status: ReservationStatus.CONFIRMED },
-            select: { id: true },
+            select: { id: true, status: true },
           },
         },
       }),
@@ -71,31 +70,35 @@ export default async function AdminPage() {
             adminNote: request.adminNote,
             createdAt: request.createdAt.toISOString(),
           }))}
-          experiences={experiences.map((experience) => ({
-            id: experience.id,
-            title: experience.title,
-            slug: experience.slug,
-            description: experience.description,
-            location: experience.location,
-            dateTime: experience.dateTime.toISOString(),
-            imageUrl: experience.imageUrl,
-            hostedByLabel: experience.hostedByLabel,
-            hostName: experience.hostName,
-            hostTitle: experience.hostTitle,
-            hostBio: experience.hostBio,
-            seatsTotal: experience.seatsTotal,
-            isVisible: experience.isVisible,
-            isInviteOnly: experience.isInviteOnly,
-            isArchived: experience.isArchived,
-            confirmedCount: experience.reservations.length,
-            remainingSeats:
-              experience.seatsTotal === null
-                ? null
-                : Math.max(
-                    experience.seatsTotal - experience.reservations.length,
-                    0,
-                  ),
-          }))}
+          experiences={experiences.map((experience) => {
+            const confirmedCount = experience.reservations.filter(
+              (reservation) => reservation.status === ReservationStatus.CONFIRMED,
+            ).length;
+
+            return {
+              id: experience.id,
+              title: experience.title,
+              slug: experience.slug,
+              description: experience.description,
+              location: experience.location,
+              dateTime: experience.dateTime.toISOString(),
+              imageUrl: experience.imageUrl,
+              hostedByLabel: experience.hostedByLabel,
+              hostName: experience.hostName,
+              hostTitle: experience.hostTitle,
+              hostBio: experience.hostBio,
+              seatsTotal: experience.seatsTotal,
+              isVisible: experience.isVisible,
+              isInviteOnly: experience.isInviteOnly,
+              isArchived: experience.isArchived,
+              confirmedCount,
+              reservationCount: experience.reservations.length,
+              remainingSeats:
+                experience.seatsTotal === null
+                  ? null
+                  : Math.max(experience.seatsTotal - confirmedCount, 0),
+            };
+          })}
           reservations={reservations.map((reservation) => ({
             id: reservation.id,
             status: reservation.status,
