@@ -1,0 +1,183 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AccessStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  WAITLISTED
+}
+
+enum UserRole {
+  MEMBER
+  ADMIN
+}
+
+enum ReservationStatus {
+  REQUESTED
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+}
+
+enum ReferralStatus {
+  SENT
+  REQUESTED
+  APPROVED
+  DECLINED
+}
+
+enum EmailStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model User {
+  id            String            @id @default(cuid())
+  email         String            @unique
+  emailVerified Boolean           @default(false)
+  fullName      String
+  avatarUrl     String?
+  accessStatus  AccessStatus      @default(PENDING)
+  role          UserRole          @default(MEMBER)
+  referredBy    String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  reservations  Reservation[]
+  referrals     Referral[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@map("verification")
+}
+
+model AccessRequest {
+  id                   String       @id @default(cuid())
+  fullName             String
+  email                String
+  phone                String
+  referredBy           String?
+  interests            String[]
+  preferredExperiences String[]
+  message              String
+  status               AccessStatus @default(PENDING)
+  reviewedAt           DateTime?
+  createdAt            DateTime     @default(now())
+
+  @@index([email])
+  @@index([status])
+}
+
+model Experience {
+  id            String        @id @default(cuid())
+  title         String
+  slug          String        @unique
+  description   String
+  location      String
+  dateTime      DateTime
+  imageUrl      String
+  hostedByLabel String
+  hostName      String
+  hostTitle     String?
+  hostBio       String?
+  seatsTotal    Int?
+  isVisible     Boolean       @default(true)
+  isInviteOnly  Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  reservations  Reservation[]
+
+  @@index([isVisible])
+  @@index([dateTime])
+}
+
+model Reservation {
+  id           String            @id @default(cuid())
+  userId       String
+  experienceId String
+  status       ReservationStatus @default(REQUESTED)
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  experience   Experience        @relation(fields: [experienceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, experienceId])
+  @@index([status])
+}
+
+model Referral {
+  id            String         @id @default(cuid())
+  referrerId    String
+  referredName  String
+  referredEmail String
+  relationship  String
+  note          String?
+  status        ReferralStatus @default(SENT)
+  createdAt     DateTime       @default(now())
+  referrer      User           @relation(fields: [referrerId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId])
+  @@index([referredEmail])
+}
+
+model EmailLog {
+  id                String      @id @default(cuid())
+  toEmail           String
+  templateKey       String
+  status            EmailStatus
+  providerMessageId String?
+  createdAt         DateTime    @default(now())
+
+  @@index([toEmail])
+  @@index([templateKey])
+}
