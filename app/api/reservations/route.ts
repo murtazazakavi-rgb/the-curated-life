@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     },
   });
 
-  if (existing) {
+  if (existing && existing.status !== ReservationStatus.CANCELLED) {
     return NextResponse.json({ ok: true, reservation: existing });
   }
 
@@ -64,13 +64,18 @@ export async function POST(request: Request) {
       ? ReservationStatus.WAITLISTED
       : ReservationStatus.REQUESTED;
 
-  const reservation = await prisma.reservation.create({
-    data: {
-      userId: member.id,
-      experienceId: experience.id,
-      status,
-    },
-  });
+  const reservation = existing
+    ? await prisma.reservation.update({
+        where: { id: existing.id },
+        data: { status },
+      })
+    : await prisma.reservation.create({
+        data: {
+          userId: member.id,
+          experienceId: experience.id,
+          status,
+        },
+      });
 
   const emailTemplate =
     status === ReservationStatus.WAITLISTED
