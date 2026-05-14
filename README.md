@@ -29,6 +29,7 @@ SMTP_PORT=465
 SMTP_USER=""
 SMTP_PASSWORD=""
 EMAIL_FROM="The Curated Life <hello@thecuratedlife.in>"
+BLOB_READ_WRITE_TOKEN=""
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 ```
 

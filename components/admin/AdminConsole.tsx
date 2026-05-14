@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { formatExperienceDate } from "@/lib/data/experiences";
 
 type AccessRequestView = {
@@ -130,6 +130,17 @@ type ExperiencePayload = {
   isArchived: boolean;
 };
 
+type ImageUploadStatus =
+  | "idle"
+  | "compressing"
+  | "uploading"
+  | "uploaded"
+  | "error";
+
+type ImageUploadFieldProps = {
+  defaultValue?: string;
+};
+
 const adminTabs: Array<{ id: AdminTab; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "requests", label: "Access Requests" },
@@ -139,6 +150,88 @@ const adminTabs: Array<{ id: AdminTab; label: string }> = [
   { id: "referrals", label: "Referrals" },
   { id: "emails", label: "Emails" },
 ];
+
+const MAX_EVENT_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_EVENT_IMAGE_WIDTH = 1800;
+
+function formatFileSize(bytes: number) {
+  if (!bytes) return "0 KB";
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  type: string,
+  quality: number,
+) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("We could not compress that image."));
+        }
+      },
+      type,
+      quality,
+    );
+  });
+}
+
+function loadImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("We could not read that image file."));
+    };
+    image.src = url;
+  });
+}
+
+async function compressImageToWebp(file: File) {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Upload a JPG, PNG, or WebP image.");
+  }
+
+  const image = await loadImage(file);
+  let width = Math.min(image.naturalWidth, MAX_EVENT_IMAGE_WIDTH);
+  let height = Math.round((image.naturalHeight / image.naturalWidth) * width);
+
+  for (let pass = 0; pass < 5; pass += 1) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Your browser could not prepare that image.");
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+
+    for (const quality of [0.86, 0.78, 0.7, 0.62, 0.54, 0.46]) {
+      const blob = await canvasToBlob(canvas, "image/webp", quality);
+
+      if (blob.size <= MAX_EVENT_IMAGE_BYTES) {
+        return new File([blob], "event-image.webp", { type: "image/webp" });
+      }
+    }
+
+    width = Math.round(width * 0.82);
+    height = Math.round(height * 0.82);
+  }
+
+  throw new Error("Please choose a smaller image. We could not compress it below 2 MB.");
+}
 
 function toDateTimeLocal(value: string) {
   const date = new Date(value);
@@ -211,6 +304,114 @@ function hydrateExperience(
     remainingSeats:
       seatsTotal === null ? null : Math.max(seatsTotal - confirmedCount, 0),
   };
+}
+
+function EventImageField({ defaultValue = "" }: ImageUploadFieldProps) {
+  const [imageUrl, setImageUrl] = useState(defaultValue);
+  const [status, setStatus] = useState<ImageUploadStatus>("idle");
+  const [message, setMessage] = useState("");
+  const [originalSize, setOriginalSize] = useState<number | null>(null);
+  const [compressedSize, setCompressedSize] = useState<number | null>(null);
+
+  async function uploadImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setStatus("compressing");
+    setMessage("Compressing image to 2 MB or less.");
+    setOriginalSize(file.size);
+    setCompressedSize(null);
+
+    try {
+      const compressedFile = await compressImageToWebp(file);
+      setCompressedSize(compressedFile.size);
+      setStatus("uploading");
+      setMessage("Uploading compressed image.");
+
+      const form = event.currentTarget.form;
+      const slugInput = form?.elements.namedItem("slug");
+      const slug =
+        slugInput instanceof HTMLInputElement ? slugInput.value : "event";
+      const formData = new FormData();
+      formData.append("file", compressedFile);
+      formData.append("slug", slug);
+
+      const response = await fetch("/api/admin/uploads", {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        url?: string;
+      };
+
+      if (!response.ok || !payload.url) {
+        throw new Error(payload.error ?? "We could not upload that image.");
+      }
+
+      setImageUrl(payload.url);
+      setStatus("uploaded");
+      setMessage("Image uploaded and ready for this event.");
+    } catch (error) {
+      setStatus("error");
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "We could not prepare that image.",
+      );
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  return (
+    <div className="field full-field image-upload-field">
+      <span>Event image</span>
+      <div className="image-upload-shell">
+        {imageUrl ? (
+          <div className="image-upload-preview">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageUrl} alt="Selected event" />
+          </div>
+        ) : (
+          <div className="image-upload-empty">No image selected</div>
+        )}
+        <div className="image-upload-controls">
+          <label className="small-button bronze image-upload-button">
+            Upload Image
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={uploadImage}
+            />
+          </label>
+          <label className="field image-url-field">
+            <span>Image URL</span>
+            <input
+              name="imageUrl"
+              className="input"
+              value={imageUrl}
+              onChange={(event) => {
+                setImageUrl(event.target.value);
+                setStatus("idle");
+                setMessage("");
+              }}
+              placeholder="Upload an image or paste an image URL"
+              required
+            />
+          </label>
+          <div className={`image-upload-status status-${status}`}>
+            {originalSize ? <span>Original {formatFileSize(originalSize)}</span> : null}
+            {compressedSize ? (
+              <span>Compressed {formatFileSize(compressedSize)}</span>
+            ) : null}
+            {message ? <span>{message}</span> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function AdminConsole({
@@ -1012,7 +1213,7 @@ export function AdminConsole({
               <label className="field"><span>Slug</span><input name="slug" className="input" defaultValue={editingExperience.slug} required /></label>
               <label className="field"><span>Location</span><input name="location" className="input" defaultValue={editingExperience.location} required /></label>
               <label className="field"><span>Date and time</span><input name="dateTime" type="datetime-local" className="input" defaultValue={toDateTimeLocal(editingExperience.dateTime)} required /></label>
-              <label className="field"><span>Image URL</span><input name="imageUrl" className="input" defaultValue={editingExperience.imageUrl} required /></label>
+              <EventImageField defaultValue={editingExperience.imageUrl} />
               <label className="field"><span>Seats</span><input name="seatsTotal" type="number" min="1" className="input" defaultValue={editingExperience.seatsTotal ?? ""} /></label>
               <label className="field full-field"><span>Description</span><textarea name="description" className="textarea" defaultValue={editingExperience.description} required /></label>
               <label className="field"><span>Hosted by label</span><input name="hostedByLabel" className="input" defaultValue={editingExperience.hostedByLabel} required /></label>
@@ -1054,7 +1255,7 @@ export function AdminConsole({
               <label className="field"><span>Slug</span><input name="slug" className="input" required /></label>
               <label className="field"><span>Location</span><input name="location" className="input" required /></label>
               <label className="field"><span>Date and time</span><input name="dateTime" type="datetime-local" className="input" required /></label>
-              <label className="field"><span>Image URL</span><input name="imageUrl" className="input" required /></label>
+              <EventImageField />
               <label className="field"><span>Seats</span><input name="seatsTotal" type="number" min="1" className="input" /></label>
               <label className="field full-field"><span>Description</span><textarea name="description" className="textarea" required /></label>
               <label className="field"><span>Hosted by label</span><input name="hostedByLabel" className="input" required /></label>
