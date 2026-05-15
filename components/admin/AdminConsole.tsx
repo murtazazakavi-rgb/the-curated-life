@@ -436,11 +436,14 @@ export function AdminConsole({
   const [requestState, setRequestState] = useState(requests);
   const [experienceState, setExperienceState] = useState(experiences);
   const [reservationState, setReservationState] = useState(reservations);
+  const [memberState, setMemberState] = useState(members);
   const [requestFilter, setRequestFilter] = useState("ALL");
   const [requestSearch, setRequestSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [requestNote, setRequestNote] = useState("");
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [deleteMemberTargetId, setDeleteMemberTargetId] = useState<string | null>(null);
   const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
   const [isCreatingExperience, setIsCreatingExperience] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -449,6 +452,10 @@ export function AdminConsole({
 
   const selectedRequest = requestState.find(
     (request) => request.id === selectedRequestId,
+  );
+  const editingMember = memberState.find((member) => member.id === editingMemberId);
+  const deleteMemberTarget = memberState.find(
+    (member) => member.id === deleteMemberTargetId,
   );
   const editingExperience = experienceState.find(
     (experience) => experience.id === editingExperienceId,
@@ -473,13 +480,13 @@ export function AdminConsole({
 
   const filteredMembers = useMemo(() => {
     const q = memberSearch.trim().toLowerCase();
-    return members.filter(
+    return memberState.filter(
       (member) =>
         !q ||
         member.fullName.toLowerCase().includes(q) ||
         member.email.toLowerCase().includes(q),
     );
-  }, [memberSearch, members]);
+  }, [memberSearch, memberState]);
 
   const dashboardCards = [
     {
@@ -488,7 +495,7 @@ export function AdminConsole({
     },
     {
       label: "Approved members",
-      value: members.filter((member) => member.accessStatus === "APPROVED").length,
+      value: memberState.filter((member) => member.accessStatus === "APPROVED").length,
     },
     {
       label: "Live events",
@@ -594,6 +601,61 @@ export function AdminConsole({
         ? "Password setup email resent."
         : `Access request ${prettyStatus(payload.status).toLowerCase()}.`,
     );
+  }
+
+  async function saveMember(event: FormEvent<HTMLFormElement>, id: string) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      fullName: fieldValue(formData, "fullName"),
+      email: fieldValue(formData, "email"),
+      role: fieldValue(formData, "role"),
+      accessStatus: fieldValue(formData, "accessStatus"),
+    };
+    const body = await runJson<{ member: MemberView }>(
+      `member:${id}:save`,
+      `/api/admin/members/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "Could not update member.",
+    );
+
+    if (!body) return;
+
+    setMemberState((current) =>
+      current.map((member) =>
+        member.id === id
+          ? {
+              ...member,
+              fullName: body.member.fullName,
+              email: body.member.email,
+              role: body.member.role,
+              accessStatus: body.member.accessStatus,
+              suspendedAt: body.member.suspendedAt,
+            }
+          : member,
+      ),
+    );
+    setEditingMemberId(null);
+    showToast("success", "Member details saved.");
+  }
+
+  async function deleteMember(id: string) {
+    const payload = await runJson<{ ok: boolean }>(
+      `member:${id}:delete`,
+      `/api/admin/members/${id}`,
+      { method: "DELETE" },
+      "Could not delete member.",
+    );
+
+    if (!payload) return;
+
+    setMemberState((current) => current.filter((member) => member.id !== id));
+    setDeleteMemberTargetId(null);
+    showToast("success", "Member deleted.");
   }
 
   async function patchExperience(
@@ -876,6 +938,22 @@ export function AdminConsole({
                       </span>
                       <span>{member.role}</span>
                       <span>{member.passwordSetAt ? "Password set" : "Setup pending"}</span>
+                    </span>
+                    <span className="admin-actions">
+                      <button
+                        type="button"
+                        className="small-button secondary"
+                        onClick={() => setEditingMemberId(member.id)}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="small-button danger"
+                        onClick={() => setDeleteMemberTargetId(member.id)}
+                      >
+                        Delete
+                      </button>
                     </span>
                   </article>
                 ))}
@@ -1197,6 +1275,88 @@ export function AdminConsole({
                     : "Resend setup email"}
                 </button>
               ) : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {editingMember ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Edit member">
+          <aside className="admin-drawer">
+            <div className="drawer-head">
+              <div>
+                <p className="eyebrow">Edit Member</p>
+                <h2 className="panel-title">{editingMember.fullName}</h2>
+              </div>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setEditingMemberId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <form className="field-grid drawer-form" onSubmit={(event) => saveMember(event, editingMember.id)}>
+              <label className="field full-field">
+                <span>Full name</span>
+                <input name="fullName" className="input" defaultValue={editingMember.fullName} required />
+              </label>
+              <label className="field full-field">
+                <span>Email</span>
+                <input name="email" type="email" className="input" defaultValue={editingMember.email} required />
+              </label>
+              <label className="field">
+                <span>Role</span>
+                <select name="role" className="input" defaultValue={editingMember.role}>
+                  <option value="MEMBER">Member</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Access status</span>
+                <select name="accessStatus" className="input" defaultValue={editingMember.accessStatus}>
+                  <option value="PENDING">Pending</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="WAITLISTED">Waitlisted</option>
+                  <option value="DECLINED">Declined</option>
+                </select>
+              </label>
+              <button
+                className="small-button bronze full-field"
+                disabled={isLoading(`member:${editingMember.id}:save`)}
+              >
+                {isLoading(`member:${editingMember.id}:save`) ? "Saving" : "Save member"}
+              </button>
+            </form>
+          </aside>
+        </div>
+      ) : null}
+
+      {deleteMemberTarget ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Delete member confirmation">
+          <aside className="confirm-modal">
+            <p className="eyebrow">Destructive action</p>
+            <h2 className="panel-title">Delete {deleteMemberTarget.fullName}?</h2>
+            <p className="section-copy">
+              This permanently removes the member account, sessions, reservations,
+              and referrals tied to this member. This cannot be undone.
+            </p>
+            <div className="drawer-actions">
+              <button
+                type="button"
+                className="small-button danger"
+                disabled={isLoading(`member:${deleteMemberTarget.id}:delete`)}
+                onClick={() => deleteMember(deleteMemberTarget.id)}
+              >
+                {isLoading(`member:${deleteMemberTarget.id}:delete`) ? "Deleting" : "Delete member"}
+              </button>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setDeleteMemberTargetId(null)}
+              >
+                Cancel
+              </button>
             </div>
           </aside>
         </div>

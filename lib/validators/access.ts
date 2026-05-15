@@ -85,3 +85,10 @@ export const forgotPasswordSchema = z.object({
 export const reservationDecisionSchema = z.object({
   status: z.enum(["CONFIRMED", "WAITLISTED", "CANCELLED"]),
 });
+
+export const memberAdminSchema = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(180).transform((value) => value.toLowerCase()),
+  role: z.enum(["MEMBER", "ADMIN"]),
+  accessStatus: z.enum(["PENDING", "APPROVED", "DECLINED", "WAITLISTED"]),
+});
