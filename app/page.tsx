@@ -4,26 +4,55 @@ import { ExperienceCard } from "@/components/home/ExperienceCard";
 import { Footer } from "@/components/home/Footer";
 import { SiteHeader } from "@/components/home/SiteHeader";
 import { curatedExperiences } from "@/lib/data/experiences";
-import { publicEventWhere } from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 
 export const dynamic = "force-dynamic";
 
+async function getHomepageExperiences() {
+  if (!process.env.DATABASE_URL) {
+    return curatedExperiences;
+  }
+
+  try {
+    return await getPrisma().experience.findMany({
+      where: {
+        isVisible: true,
+        isArchived: false,
+        dateTime: { gte: new Date() },
+      },
+      orderBy: { dateTime: "asc" },
+      select: {
+        title: true,
+        slug: true,
+        imageUrl: true,
+        location: true,
+        dateTime: true,
+        description: true,
+        hostedByLabel: true,
+        hostName: true,
+        hostTitle: true,
+        hostBio: true,
+        seatsTotal: true,
+        isVisible: true,
+        isInviteOnly: true,
+      },
+    });
+  } catch (error) {
+    console.error("homepage experiences failed; using curated fallback", error);
+    return curatedExperiences;
+  }
+}
+
 export default async function Home() {
-  const experiences = process.env.DATABASE_URL
-    ? await getPrisma().experience.findMany({
-        where: publicEventWhere(),
-        orderBy: { dateTime: "asc" },
-      })
-    : curatedExperiences
-        .filter(
-          (experience) =>
-            experience.isVisible && new Date(experience.dateTime) >= new Date(),
-        )
-        .sort(
-          (first, second) =>
-            new Date(first.dateTime).getTime() - new Date(second.dateTime).getTime(),
-        );
+  const experiences = (await getHomepageExperiences())
+    .filter(
+      (experience) =>
+        experience.isVisible && new Date(experience.dateTime) >= new Date(),
+    )
+    .sort(
+      (first, second) =>
+        new Date(first.dateTime).getTime() - new Date(second.dateTime).getTime(),
+    );
 
   const marqueeItems = [
     "Private invitations",
