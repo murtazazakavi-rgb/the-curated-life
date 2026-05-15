@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { formatIndiaDateTimeLocal } from "@/lib/dates/india";
 import { formatExperienceDate } from "@/lib/data/experiences";
 
 type AccessRequestView = {
@@ -234,9 +235,7 @@ async function compressImageToWebp(file: File) {
 }
 
 function toDateTimeLocal(value: string) {
-  const date = new Date(value);
-  const offset = date.getTimezoneOffset();
-  return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16);
+  return formatIndiaDateTimeLocal(value);
 }
 
 function seatsLabel(experience: ExperienceView) {
@@ -314,7 +313,9 @@ function EventImageField({ defaultValue = "" }: ImageUploadFieldProps) {
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
 
   async function uploadImage(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    const form = input.form ?? input.closest("form");
 
     if (!file) return;
 
@@ -329,7 +330,6 @@ function EventImageField({ defaultValue = "" }: ImageUploadFieldProps) {
       setStatus("uploading");
       setMessage("Uploading compressed image.");
 
-      const form = event.currentTarget.form;
       const slugInput = form?.elements.namedItem("slug");
       const slug =
         slugInput instanceof HTMLInputElement ? slugInput.value : "event";
@@ -361,7 +361,7 @@ function EventImageField({ defaultValue = "" }: ImageUploadFieldProps) {
           : "We could not prepare that image.",
       );
     } finally {
-      event.target.value = "";
+      input.value = "";
     }
   }
 

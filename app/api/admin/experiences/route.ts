@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
+import { parseIndiaDateTimeLocal } from "@/lib/dates/india";
 import { getPrisma } from "@/lib/prisma/client";
 import { experienceAdminSchema } from "@/lib/validators/access";
 
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
       hostTitle: data.hostTitle || null,
       hostBio: data.hostBio || null,
       seatsTotal: data.seatsTotal ?? null,
-      dateTime: new Date(data.dateTime),
+      dateTime: parseIndiaDateTimeLocal(data.dateTime),
     },
   });
 

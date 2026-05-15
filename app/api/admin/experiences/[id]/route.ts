@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
+import { parseIndiaDateTimeLocal } from "@/lib/dates/india";
 import { getPrisma } from "@/lib/prisma/client";
 import { experienceAdminSchema } from "@/lib/validators/access";
 
@@ -28,7 +29,7 @@ export async function PATCH(
     where: { id },
     data: {
       ...data,
-      dateTime: data.dateTime ? new Date(data.dateTime) : undefined,
+      dateTime: data.dateTime ? parseIndiaDateTimeLocal(data.dateTime) : undefined,
       hostTitle: data.hostTitle === "" ? null : data.hostTitle,
       hostBio: data.hostBio === "" ? null : data.hostBio,
       seatsTotal: data.seatsTotal === undefined ? undefined : data.seatsTotal,
