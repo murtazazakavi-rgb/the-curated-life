@@ -161,6 +161,14 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function parseUploadResponse(value: string) {
+  try {
+    return value ? (JSON.parse(value) as { error?: string; url?: string }) : {};
+  } catch {
+    return {};
+  }
+}
+
 function canvasToBlob(
   canvas: HTMLCanvasElement,
   type: string,
@@ -341,13 +349,15 @@ function EventImageField({ defaultValue = "" }: ImageUploadFieldProps) {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        url?: string;
-      };
+      const responseText = await response.text();
+      const payload = parseUploadResponse(responseText);
 
       if (!response.ok || !payload.url) {
-        throw new Error(payload.error ?? "We could not upload that image.");
+        throw new Error(
+          payload.error ||
+            responseText ||
+            `Upload failed with status ${response.status}.`,
+        );
       }
 
       setImageUrl(payload.url);
