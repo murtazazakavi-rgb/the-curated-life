@@ -17,6 +17,24 @@ import {
 
 export const runtime = "nodejs";
 
+async function hasLifecycleSchema() {
+  try {
+    const [result] = await getPrisma().$queryRaw<Array<{ ready: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'Experience'
+          AND column_name = 'status'
+      ) AS ready
+    `;
+
+    return Boolean(result?.ready);
+  } catch (error) {
+    console.error("reservation schema readiness check failed", error);
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
   const member = await getAuthorizedMember();
 
@@ -32,18 +50,26 @@ export async function POST(request: Request) {
   }
 
   const prisma = getPrisma();
+  const lifecycleReady = await hasLifecycleSchema();
   const experience = await prisma.experience.findFirst({
-    where: {
-      id: parsed.data.experience_id,
-      status: EventStatus.PUBLISHED,
-      isVisible: true,
-      isArchived: false,
-      dateTime: { gte: new Date() },
-      OR: [
-        { visibilityType: "ALL_MEMBERS" },
-        { audienceMembers: { some: { userId: member.id } } },
-      ],
-    },
+    where: lifecycleReady
+      ? {
+          id: parsed.data.experience_id,
+          status: EventStatus.PUBLISHED,
+          isVisible: true,
+          isArchived: false,
+          dateTime: { gte: new Date() },
+          OR: [
+            { visibilityType: "ALL_MEMBERS" },
+            { audienceMembers: { some: { userId: member.id } } },
+          ],
+        }
+      : {
+          id: parsed.data.experience_id,
+          isVisible: true,
+          isArchived: false,
+          dateTime: { gte: new Date() },
+        },
   });
 
   if (!experience) {
@@ -77,14 +103,16 @@ export async function POST(request: Request) {
   const reservation = existing
     ? await prisma.reservation.update({
         where: { id: existing.id },
-        data: {
-          status,
-          cancellationRequestedAt: null,
-          cancellationReason: null,
-          cancellationNote: null,
-          previousStatus: null,
-          adminCancellationReply: null,
-        },
+        data: lifecycleReady
+          ? {
+              status,
+              cancellationRequestedAt: null,
+              cancellationReason: null,
+              cancellationNote: null,
+              previousStatus: null,
+              adminCancellationReply: null,
+            }
+          : { status },
       })
     : await prisma.reservation.create({
         data: {
@@ -135,6 +163,18 @@ export async function DELETE(request: Request) {
   }
 
   const prisma = getPrisma();
+  const lifecycleReady = await hasLifecycleSchema();
+
+  if (!lifecycleReady) {
+    return NextResponse.json(
+      {
+        error:
+          "Cancellation requests will be available once the member update finishes.",
+      },
+      { status: 503 },
+    );
+  }
+
   const reservation = await prisma.reservation.findFirst({
     where: {
       id: parsed.data.reservation_id,
