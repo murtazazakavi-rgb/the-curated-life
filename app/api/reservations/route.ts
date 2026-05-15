@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import {
-  reservationCancelledEmail,
+  adminCancellationRequestedEmail,
   reservationRequestedEmail,
   reservationWaitlistedEmail,
 } from "@/lib/email/templates";
 import { getAuthorizedMember } from "@/lib/auth/server";
+import { getAdminEmails } from "@/lib/admin/access";
 import { sendTransactionalEmail } from "@/lib/email/send";
-import { ReservationStatus } from "@/lib/generated/prisma/enums";
+import { EventStatus, ReservationStatus } from "@/lib/generated/prisma/enums";
+import { siteUrl } from "@/lib/email/templates/base";
 import { getPrisma } from "@/lib/prisma/client";
-import { reservationSchema } from "@/lib/validators/access";
+import {
+  cancellationRequestSchema,
+  reservationSchema,
+} from "@/lib/validators/access";
 
 export const runtime = "nodejs";
 
@@ -30,9 +35,14 @@ export async function POST(request: Request) {
   const experience = await prisma.experience.findFirst({
     where: {
       id: parsed.data.experience_id,
+      status: EventStatus.PUBLISHED,
       isVisible: true,
       isArchived: false,
       dateTime: { gte: new Date() },
+      OR: [
+        { visibilityType: "ALL_MEMBERS" },
+        { audienceMembers: { some: { userId: member.id } } },
+      ],
     },
   });
 
@@ -67,7 +77,14 @@ export async function POST(request: Request) {
   const reservation = existing
     ? await prisma.reservation.update({
         where: { id: existing.id },
-        data: { status },
+        data: {
+          status,
+          cancellationRequestedAt: null,
+          cancellationReason: null,
+          cancellationNote: null,
+          previousStatus: null,
+          adminCancellationReply: null,
+        },
       })
     : await prisma.reservation.create({
         data: {
@@ -108,17 +125,19 @@ export async function DELETE(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const reservationId =
-    typeof body?.reservation_id === "string" ? body.reservation_id : "";
+  const parsed = cancellationRequestSchema.safeParse(body);
 
-  if (!reservationId) {
-    return NextResponse.json({ error: "Reservation is required." }, { status: 400 });
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Please share a cancellation reason." },
+      { status: 400 },
+    );
   }
 
   const prisma = getPrisma();
   const reservation = await prisma.reservation.findFirst({
     where: {
-      id: reservationId,
+      id: parsed.data.reservation_id,
       userId: member.id,
     },
     include: { experience: true },
@@ -128,23 +147,44 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Reservation not found." }, { status: 404 });
   }
 
+  if (
+    reservation.status === ReservationStatus.CANCELLED ||
+    reservation.status === ReservationStatus.CANCELLATION_REQUESTED
+  ) {
+    return NextResponse.json({ ok: true, reservation });
+  }
+
   const updated = await prisma.reservation.update({
     where: { id: reservation.id },
-    data: { status: ReservationStatus.CANCELLED },
+    data: {
+      status: ReservationStatus.CANCELLATION_REQUESTED,
+      previousStatus: reservation.status,
+      cancellationRequestedAt: new Date(),
+      cancellationReason: parsed.data.reason,
+      cancellationNote: parsed.data.note || null,
+    },
   });
 
-  const email = reservationCancelledEmail({
-    name: member.fullName,
-    experienceTitle: reservation.experience.title,
-  });
+  await Promise.all(
+    getAdminEmails().map((to) => {
+      const email = adminCancellationRequestedEmail({
+        memberName: member.fullName,
+        memberEmail: member.email,
+        experienceTitle: reservation.experience.title,
+        reason: parsed.data.reason,
+        note: parsed.data.note,
+        adminUrl: siteUrl("/admin"),
+      });
 
-  await sendTransactionalEmail({
-    to: member.email,
-    templateKey: "reservation_cancelled",
-    ...email,
-  }).catch((error) => {
-    console.error("reservation_cancelled email failed", error);
-  });
+      return sendTransactionalEmail({
+        to,
+        templateKey: "admin_cancellation_requested",
+        ...email,
+      }).catch((error) => {
+        console.error("admin_cancellation_requested email failed", error);
+      });
+    }),
+  );
 
   return NextResponse.json({ ok: true, reservation: updated });
 }

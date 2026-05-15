@@ -4,6 +4,7 @@ import { ExperienceCard } from "@/components/home/ExperienceCard";
 import { Footer } from "@/components/home/Footer";
 import { SiteHeader } from "@/components/home/SiteHeader";
 import { curatedExperiences } from "@/lib/data/experiences";
+import { publicEventWhere } from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const experiences = process.env.DATABASE_URL
     ? await getPrisma().experience.findMany({
-        where: {
-          isVisible: true,
-          isArchived: false,
-          dateTime: { gte: new Date() },
-        },
+        where: publicEventWhere(),
         orderBy: { dateTime: "asc" },
       })
     : curatedExperiences
@@ -135,7 +132,7 @@ export default async function Home() {
                 </h2>
               </div>
               <p className="section-copy">
-                The Curated Life is not an open booking platform. People apply first,
+                The Curated Life is not an open reservation platform. People apply first,
                 every request is reviewed personally, and access is granted manually so
                 each room can stay warm, intentional, and human in scale.
               </p>

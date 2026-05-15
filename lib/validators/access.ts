@@ -66,6 +66,27 @@ export const experienceAdminSchema = z.object({
   isVisible: z.boolean(),
   isInviteOnly: z.boolean(),
   isArchived: z.boolean().optional(),
+  status: z
+    .enum(["DRAFT", "PUBLISHED", "POSTPONED", "CANCELLED", "ARCHIVED"])
+    .optional(),
+  visibilityType: z
+    .enum(["ALL_MEMBERS", "SELECTED_MEMBERS", "INVITE_ONLY"])
+    .optional(),
+  attendeeVisibilityEnabled: z.boolean().optional(),
+  selectedMemberIds: z.array(z.string().trim().min(1)).max(500).optional(),
+});
+
+export const experienceLifecycleSchema = z.object({
+  action: z.enum([
+    "save_draft",
+    "publish",
+    "unpublish",
+    "postpone",
+    "cancel",
+    "archive",
+  ]),
+  postponementMessage: z.string().trim().max(1200).optional().or(z.literal("")),
+  cancellationReason: z.string().trim().max(1200).optional().or(z.literal("")),
 });
 
 export const loginSchema = z.object({
@@ -83,7 +104,36 @@ export const forgotPasswordSchema = z.object({
 });
 
 export const reservationDecisionSchema = z.object({
-  status: z.enum(["CONFIRMED", "WAITLISTED", "CANCELLED"]),
+  status: z.enum(["CONFIRMED", "WAITLISTED", "CANCELLED"]).optional(),
+  action: z.enum(["approve_cancellation", "decline_cancellation"]).optional(),
+  adminReply: z.string().trim().max(900).optional().or(z.literal("")),
+}).refine((value) => Boolean(value.status || value.action), {
+  message: "Choose a reservation action.",
+});
+
+export const cancellationRequestSchema = z.object({
+  reservation_id: z.string().trim().min(1),
+  reason: z.string().trim().min(3).max(160),
+  note: z.string().trim().max(900).optional().or(z.literal("")),
+});
+
+export const feedbackCreateSchema = z.object({
+  category: z.enum([
+    "EXPERIENCE_FEEDBACK",
+    "PRODUCT_FEEDBACK",
+    "TECHNICAL_ISSUE",
+    "SUGGESTION",
+    "GENERAL_MESSAGE",
+  ]),
+  subject: z.string().trim().min(3).max(140),
+  message: z.string().trim().min(8).max(1600),
+});
+
+export const feedbackAdminSchema = z.object({
+  status: z
+    .enum(["OPEN", "UNDER_REVIEW", "REPLIED", "CLOSED"])
+    .optional(),
+  reply: z.string().trim().max(1600).optional().or(z.literal("")),
 });
 
 export const memberAdminSchema = z.object({

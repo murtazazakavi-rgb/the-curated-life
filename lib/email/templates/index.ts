@@ -82,18 +82,31 @@ export function adminNewAccessRequestEmail(input: {
 export function accessApprovedSetPasswordEmail(input: {
   name: string;
   setupUrl: string;
+  experiences?: Array<{ title: string; dateTime: string | Date; location: string }>;
 }): EmailTemplate {
   const title = "Access has been personally granted.";
-  const body = `Dear ${escapeHtml(input.name)}, your request has been approved. Please set your password using the private link below, then sign in with this email address.`;
+  const experienceList = input.experiences?.length
+    ? `<div style="margin:22px 0 0;padding:16px;border:1px solid rgba(15,15,15,.08);border-radius:18px;background:#fffaf2;">
+        <p style="margin:0 0 10px;color:#8B7A68;font:600 10px/1.4 Inter,Arial,sans-serif;letter-spacing:.14em;text-transform:uppercase;">Live experiences waiting inside</p>
+        ${input.experiences
+          .slice(0, 3)
+          .map(
+            (experience) =>
+              `<p style="margin:0 0 10px;color:#2A2925;font:300 14px/1.55 Inter,Arial,sans-serif;"><strong>${escapeHtml(experience.title)}</strong><br/>${escapeHtml(experience.location)}</p>`,
+          )
+          .join("")}
+      </div>`
+    : "";
+  const body = `Dear ${escapeHtml(input.name)}, your request has been approved. Please set your password using the private link below, then sign in with this email address. Live experiences are waiting inside.`;
 
   return {
     subject: "Set your password for The Curated Life",
     html: baseEmail({
       title,
       eyebrow: "Access Granted",
-      body: paragraph(
-        `Dear ${input.name}, your request has been approved. Please set your password using the private link below, then sign in with this email address.`,
-      ),
+      body: `${paragraph(
+        `Dear ${input.name}, your request has been approved. Please set your password using the private link below, then sign in with this email address. Live experiences are waiting inside.`,
+      )}${experienceList}`,
       ctaLabel: "Set Password",
       ctaUrl: input.setupUrl,
       note: "For your security, this link expires and can only be used once.",
@@ -263,6 +276,214 @@ export function reservationCancelledEmail(input: {
       ),
     }),
     text: asText(title, body),
+  };
+}
+
+export function eventAnnouncementEmail(input: {
+  name: string;
+  experienceTitle: string;
+  when: string;
+  location: string;
+  memberUrl: string;
+  isPrivate?: boolean;
+}): EmailTemplate {
+  const title = input.isPrivate
+    ? "A private invitation is waiting."
+    : "A new invitation is waiting.";
+  const body = `Dear ${escapeHtml(input.name)}, ${escapeHtml(input.experienceTitle)} has just opened inside The Curated Life. It is planned for ${escapeHtml(input.when)} at ${escapeHtml(input.location)}. We would be glad to have you consider joining if the timing feels right.`;
+
+  return {
+    subject: `New invitation: ${input.experienceTitle}`,
+    html: baseEmail({
+      title,
+      eyebrow: input.isPrivate ? "Private Invitation" : "New Invitation",
+      body: [
+        paragraph(
+          `Dear ${input.name}, ${input.experienceTitle} has just opened inside The Curated Life.`,
+        ),
+        details([
+          ["When", input.when],
+          ["Where", input.location],
+        ]),
+      ].join(""),
+      ctaLabel: "View Invitation",
+      ctaUrl: input.memberUrl,
+      note: "Places are intentionally limited and reviewed personally.",
+    }),
+    text: asText(title, body, input.memberUrl),
+  };
+}
+
+export function eventPostponedEmail(input: {
+  name: string;
+  experienceTitle: string;
+  message: string;
+  memberUrl: string;
+}): EmailTemplate {
+  const title = "This experience has been postponed.";
+  const body = `Dear ${escapeHtml(input.name)}, we need to postpone ${escapeHtml(input.experienceTitle)} for now. ${escapeHtml(input.message)} Your place remains linked to the experience, and we will write again with the next update.`;
+
+  return {
+    subject: `Update: ${input.experienceTitle} has been postponed`,
+    html: baseEmail({
+      title,
+      eyebrow: "Experience Update",
+      body: paragraph(
+        `Dear ${input.name}, we need to postpone ${input.experienceTitle} for now. ${input.message} Your place remains linked to the experience, and we will write again with the next update.`,
+      ),
+      ctaLabel: "View Update",
+      ctaUrl: input.memberUrl,
+    }),
+    text: asText(title, body, input.memberUrl),
+  };
+}
+
+export function eventCancelledEmail(input: {
+  name: string;
+  experienceTitle: string;
+  reason: string;
+  memberUrl: string;
+}): EmailTemplate {
+  const title = "This experience has been cancelled.";
+  const body = `Dear ${escapeHtml(input.name)}, we are sorry to share that ${escapeHtml(input.experienceTitle)} has been cancelled. ${escapeHtml(input.reason)} We know a place in your calendar is personal, and we are grateful for your understanding.`;
+
+  return {
+    subject: `Update: ${input.experienceTitle} has been cancelled`,
+    html: baseEmail({
+      title,
+      eyebrow: "Experience Update",
+      body: paragraph(
+        `Dear ${input.name}, we are sorry to share that ${input.experienceTitle} has been cancelled. ${input.reason} We know a place in your calendar is personal, and we are grateful for your understanding.`,
+      ),
+      ctaLabel: "View Update",
+      ctaUrl: input.memberUrl,
+    }),
+    text: asText(title, body, input.memberUrl),
+  };
+}
+
+export function adminCancellationRequestedEmail(input: {
+  memberName: string;
+  memberEmail: string;
+  experienceTitle: string;
+  reason: string;
+  note?: string | null;
+  adminUrl: string;
+}): EmailTemplate {
+  const title = "A cancellation request needs review.";
+  const body = `${escapeHtml(input.memberName)} requested cancellation for ${escapeHtml(input.experienceTitle)}. Reason: ${escapeHtml(input.reason)}. Note: ${escapeHtml(input.note || "-")}`;
+
+  return {
+    subject: `Cancellation requested: ${input.experienceTitle}`,
+    html: baseEmail({
+      title,
+      eyebrow: "Admin Review",
+      body: details([
+        ["Member", input.memberName],
+        ["Email", input.memberEmail],
+        ["Experience", input.experienceTitle],
+        ["Reason", input.reason],
+        ["Note", input.note],
+      ]),
+      ctaLabel: "Review Request",
+      ctaUrl: input.adminUrl,
+    }),
+    text: asText(title, body, input.adminUrl),
+  };
+}
+
+export function cancellationApprovedEmail(input: {
+  name: string;
+  experienceTitle: string;
+}): EmailTemplate {
+  const title = "Your cancellation request has been approved.";
+  const body = `Dear ${escapeHtml(input.name)}, your place for ${escapeHtml(input.experienceTitle)} has been released. Thank you for letting us know with care.`;
+
+  return {
+    subject: `Cancellation approved: ${input.experienceTitle}`,
+    html: baseEmail({
+      title,
+      eyebrow: "Cancellation Approved",
+      body: paragraph(
+        `Dear ${input.name}, your place for ${input.experienceTitle} has been released. Thank you for letting us know with care.`,
+      ),
+    }),
+    text: asText(title, body),
+  };
+}
+
+export function cancellationDeclinedEmail(input: {
+  name: string;
+  experienceTitle: string;
+  reply?: string | null;
+}): EmailTemplate {
+  const title = "A note about your cancellation request.";
+  const body = `Dear ${escapeHtml(input.name)}, your place for ${escapeHtml(input.experienceTitle)} is still being held. ${escapeHtml(input.reply || "If anything has changed, you can write back to us directly.")}`;
+
+  return {
+    subject: `Cancellation request update: ${input.experienceTitle}`,
+    html: baseEmail({
+      title,
+      eyebrow: "Cancellation Update",
+      body: paragraph(
+        `Dear ${input.name}, your place for ${input.experienceTitle} is still being held. ${input.reply || "If anything has changed, you can write back to us directly."}`,
+      ),
+    }),
+    text: asText(title, body),
+  };
+}
+
+export function adminFeedbackReceivedEmail(input: {
+  memberName: string;
+  memberEmail: string;
+  category: string;
+  subject: string;
+  message: string;
+  adminUrl: string;
+}): EmailTemplate {
+  const title = "New member feedback has arrived.";
+  const body = `${escapeHtml(input.memberName)} sent ${escapeHtml(input.category)}: ${escapeHtml(input.subject)}. ${escapeHtml(input.message)}`;
+
+  return {
+    subject: `New feedback: ${input.subject}`,
+    html: baseEmail({
+      title,
+      eyebrow: "Member Feedback",
+      body: details([
+        ["Member", input.memberName],
+        ["Email", input.memberEmail],
+        ["Category", input.category],
+        ["Subject", input.subject],
+        ["Message", input.message],
+      ]),
+      ctaLabel: "Open Feedback",
+      ctaUrl: input.adminUrl,
+    }),
+    text: asText(title, body, input.adminUrl),
+  };
+}
+
+export function feedbackReplyEmail(input: {
+  name: string;
+  subject: string;
+  reply: string;
+  memberUrl: string;
+}): EmailTemplate {
+  const title = "A reply from The Curated Life.";
+  const body = `Dear ${escapeHtml(input.name)}, we have replied to your note about ${escapeHtml(input.subject)}. ${escapeHtml(input.reply)}`;
+
+  return {
+    subject: `Reply from The Curated Life: ${input.subject}`,
+    html: baseEmail({
+      title,
+      eyebrow: "Member Note",
+      body: paragraph(
+        `Dear ${input.name}, we have replied to your note about ${input.subject}. ${input.reply}`,
+      ),
+      ctaLabel: "View Reply",
+      ctaUrl: input.memberUrl,
+    }),
+    text: asText(title, body, input.memberUrl),
   };
 }
 

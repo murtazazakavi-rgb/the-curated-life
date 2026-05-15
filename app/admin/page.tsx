@@ -11,7 +11,7 @@ export default async function AdminPage() {
   await requireAdmin();
   const prisma = getPrisma();
 
-  const [requests, experiences, reservations, referrals, members, emailLogs] =
+  const [requests, experiences, reservations, referrals, members, emailLogs, feedbackThreads] =
     await Promise.all([
       prisma.accessRequest.findMany({
         orderBy: { createdAt: "desc" },
@@ -22,6 +22,9 @@ export default async function AdminPage() {
         include: {
           reservations: {
             select: { id: true, status: true },
+          },
+          audienceMembers: {
+            select: { userId: true },
           },
         },
       }),
@@ -46,6 +49,16 @@ export default async function AdminPage() {
       }),
       prisma.emailLog.findMany({
         orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
+      prisma.feedbackThread.findMany({
+        orderBy: { updatedAt: "desc" },
+        include: {
+          user: true,
+          messages: {
+            orderBy: { createdAt: "asc" },
+          },
+        },
         take: 50,
       }),
     ]);
@@ -91,7 +104,25 @@ export default async function AdminPage() {
               isVisible: experience.isVisible,
               isInviteOnly: experience.isInviteOnly,
               isArchived: experience.isArchived,
+              status: experience.status,
+              publishedAt: experience.publishedAt?.toISOString() ?? null,
+              announcementSentAt:
+                experience.announcementSentAt?.toISOString() ?? null,
+              postponedAt: experience.postponedAt?.toISOString() ?? null,
+              cancelledAt: experience.cancelledAt?.toISOString() ?? null,
+              cancellationReason: experience.cancellationReason,
+              postponementMessage: experience.postponementMessage,
+              visibilityType: experience.visibilityType,
+              attendeeVisibilityEnabled: experience.attendeeVisibilityEnabled,
+              selectedMemberIds: experience.audienceMembers.map((member) => member.userId),
               confirmedCount,
+              waitlistedCount: experience.reservations.filter(
+                (reservation) => reservation.status === ReservationStatus.WAITLISTED,
+              ).length,
+              cancellationRequestCount: experience.reservations.filter(
+                (reservation) =>
+                  reservation.status === ReservationStatus.CANCELLATION_REQUESTED,
+              ).length,
               reservationCount: experience.reservations.length,
               remainingSeats:
                 experience.seatsTotal === null
@@ -107,6 +138,11 @@ export default async function AdminPage() {
             memberEmail: reservation.user.email,
             experienceTitle: reservation.experience.title,
             seatsTotal: reservation.experience.seatsTotal,
+            cancellationRequestedAt:
+              reservation.cancellationRequestedAt?.toISOString() ?? null,
+            cancellationReason: reservation.cancellationReason,
+            cancellationNote: reservation.cancellationNote,
+            previousStatus: reservation.previousStatus,
           }))}
           referrals={referrals.map((referral) => ({
             id: referral.id,
@@ -133,6 +169,21 @@ export default async function AdminPage() {
             status: log.status,
             providerMessageId: log.providerMessageId,
             createdAt: log.createdAt.toISOString(),
+          }))}
+          feedbackThreads={feedbackThreads.map((thread) => ({
+            id: thread.id,
+            category: thread.category,
+            subject: thread.subject,
+            status: thread.status,
+            memberName: thread.user.fullName,
+            memberEmail: thread.user.email,
+            createdAt: thread.createdAt.toISOString(),
+            messages: thread.messages.map((message) => ({
+              id: message.id,
+              isAdmin: message.isAdmin,
+              message: message.message,
+              createdAt: message.createdAt.toISOString(),
+            })),
           }))}
         />
       </main>

@@ -13,12 +13,25 @@ type ExperienceView = {
   hostName: string;
   hostTitle?: string | null;
   seatsTotal?: number | null;
+  status: string;
+  attendeeVisibilityEnabled: boolean;
+  attendees: Array<{
+    id: string;
+    firstName: string;
+    avatarUrl?: string | null;
+  }>;
 };
 
 type ReservationView = {
   id: string;
   experienceId: string;
   status: string;
+  cancellationRequestedAt?: string | null;
+  cancellationReason?: string | null;
+  experienceTitle: string;
+  experienceDateTime: string;
+  experienceLocation: string;
+  eventStatus: string;
 };
 
 type ReferralView = {
@@ -38,6 +51,21 @@ type MemberDashboardProps = {
   experiences: ExperienceView[];
   reservations: ReservationView[];
   referrals: ReferralView[];
+  feedbackThreads: FeedbackThreadView[];
+};
+
+type FeedbackThreadView = {
+  id: string;
+  category: string;
+  subject: string;
+  status: string;
+  createdAt: string;
+  messages: Array<{
+    id: string;
+    isAdmin: boolean;
+    message: string;
+    createdAt: string;
+  }>;
 };
 
 export function MemberDashboard({
@@ -45,20 +73,36 @@ export function MemberDashboard({
   experiences,
   reservations,
   referrals,
+  feedbackThreads,
 }: MemberDashboardProps) {
   const [reservationState, setReservationState] = useState(reservations);
   const [referralState, setReferralState] = useState(referrals);
+  const [feedbackState, setFeedbackState] = useState(feedbackThreads);
   const [message, setMessage] = useState("");
   const [referralMessage, setReferralMessage] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [cancellationTarget, setCancellationTarget] =
+    useState<ReservationView | null>(null);
+  const [now] = useState(() => Date.now());
 
   const reservationsByExperience = useMemo(() => {
     return new Map(
-      reservationState.map((reservation) => [
-        reservation.experienceId,
-        reservation.status,
-      ]),
+      reservationState.map((reservation) => [reservation.experienceId, reservation]),
     );
   }, [reservationState]);
+
+  const upcomingHistory = reservationState.filter(
+    (reservation) =>
+      new Date(reservation.experienceDateTime).getTime() >= now &&
+      !["CANCELLED"].includes(reservation.status) &&
+      !["POSTPONED", "CANCELLED"].includes(reservation.eventStatus),
+  );
+  const pastHistory = reservationState.filter(
+    (reservation) =>
+      new Date(reservation.experienceDateTime).getTime() < now ||
+      ["CANCELLED"].includes(reservation.status) ||
+      ["POSTPONED", "CANCELLED"].includes(reservation.eventStatus),
+  );
 
   async function reserve(experienceId: string) {
     setMessage("");
@@ -77,21 +121,38 @@ export function MemberDashboard({
     }
 
     setReservationState((current) => {
+      const experience = experiences.find(
+        (item) => item.id === payload.reservation.experienceId,
+      );
+      const enrichedReservation: ReservationView = {
+        ...payload.reservation,
+        experienceTitle: experience?.title ?? "Experience",
+        experienceDateTime: experience?.dateTime ?? new Date().toISOString(),
+        experienceLocation: experience?.location ?? "",
+        eventStatus: experience?.status ?? "PUBLISHED",
+      };
       const existing = current.filter(
         (reservation) => reservation.experienceId !== payload.reservation.experienceId,
       );
-      return [...existing, payload.reservation];
+      return [...existing, enrichedReservation];
     });
-    setMessage("Reservation request received.");
+    setMessage("Your request has been received.");
   }
 
-  async function cancelReservation(reservationId: string) {
+  async function requestCancellation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cancellationTarget) return;
     setMessage("");
+    const formData = new FormData(event.currentTarget);
 
     const response = await fetch("/api/reservations", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reservation_id: reservationId }),
+      body: JSON.stringify({
+        reservation_id: cancellationTarget.id,
+        reason: String(formData.get("reason") ?? ""),
+        note: String(formData.get("note") ?? ""),
+      }),
     });
 
     const payload = await response.json();
@@ -103,12 +164,18 @@ export function MemberDashboard({
 
     setReservationState((current) =>
       current.map((reservation) =>
-        reservation.id === reservationId
-          ? { ...reservation, status: payload.reservation.status }
+        reservation.id === cancellationTarget.id
+          ? {
+              ...reservation,
+              status: payload.reservation.status,
+              cancellationRequestedAt: payload.reservation.cancellationRequestedAt,
+              cancellationReason: payload.reservation.cancellationReason,
+            }
           : reservation,
       ),
     );
-    setMessage("Reservation cancelled.");
+    setCancellationTarget(null);
+    setMessage("Cancellation requested.");
   }
 
   async function submitReferral(event: FormEvent<HTMLFormElement>) {
@@ -141,6 +208,34 @@ export function MemberDashboard({
     setReferralMessage("Invitation email sent with care.");
   }
 
+  async function submitFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFeedbackMessage("");
+
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      category: String(formData.get("category") ?? ""),
+      subject: String(formData.get("subject") ?? ""),
+      message: String(formData.get("message") ?? ""),
+    };
+
+    const response = await fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+
+    if (!response.ok) {
+      setFeedbackMessage(body.error ?? "We could not receive that note.");
+      return;
+    }
+
+    setFeedbackState((current) => [body.thread, ...current]);
+    event.currentTarget.reset();
+    setFeedbackMessage("Your note has been received.");
+  }
+
   async function signOut() {
     await fetch("/api/auth/logout", {
       method: "POST",
@@ -168,6 +263,9 @@ export function MemberDashboard({
                 </a>
                 <a className="btn btn--ghost-light" href="#refer">
                   Refer Someone <span className="arrow" />
+                </a>
+                <a className="btn btn--ghost-light" href="#history">
+                  My History <span className="arrow" />
                 </a>
               </div>
             </div>
@@ -207,10 +305,11 @@ export function MemberDashboard({
 
           <div className="stack">
             {experiences.map((experience) => {
-              const reservationStatus = reservationsByExperience.get(experience.id);
-              const reservation = reservationState.find(
-                (item) => item.experienceId === experience.id,
-              );
+              const reservation = reservationsByExperience.get(experience.id);
+              const reservationStatus = reservation?.status;
+              const canSeeAttendees =
+                reservationStatus === "CONFIRMED" &&
+                experience.attendeeVisibilityEnabled;
 
               return (
                 <article className="invite-card" key={experience.id}>
@@ -220,7 +319,13 @@ export function MemberDashboard({
                       <h3>{experience.title}</h3>
                     </div>
                     <span className="status-pill">
-                      {reservationStatus ?? "Invitation open"}
+                      {reservationStatus === "CONFIRMED"
+                        ? "You're Attending"
+                        : reservationStatus === "CANCELLATION_REQUESTED"
+                          ? "Cancellation requested"
+                          : reservationStatus
+                            ? reservationStatus.replace(/_/g, " ")
+                            : "Private Invitation"}
                     </span>
                   </div>
                   <div className="meta">
@@ -235,17 +340,39 @@ export function MemberDashboard({
                     onClick={() => reserve(experience.id)}
                     disabled={Boolean(reservationStatus)}
                   >
-                    {reservationStatus ? "Request Received" : "Reserve Place"}
+                    {reservationStatus === "CONFIRMED"
+                      ? "You're Attending"
+                      : reservationStatus
+                        ? "Request Received"
+                        : "Reserve My Spot"}
                     <span className="arrow" />
                   </button>
-                  {reservation && reservation.status !== "CANCELLED" ? (
+                  {reservation &&
+                  !["CANCELLED", "CANCELLATION_REQUESTED"].includes(
+                    reservation.status,
+                  ) ? (
                     <button
                       className="small-button secondary"
                       type="button"
-                      onClick={() => cancelReservation(reservation.id)}
+                      onClick={() => setCancellationTarget(reservation)}
                     >
-                      Cancel reservation
+                      Request Cancellation
                     </button>
+                  ) : null}
+                  {canSeeAttendees ? (
+                    <div className="attendee-section">
+                      <p className="eyebrow">Who&apos;s attending</p>
+                      <div className="attendee-list">
+                        {experience.attendees.map((attendee) => (
+                          <span className="attendee-chip" key={attendee.id}>
+                            <span className="attendee-avatar">
+                              {attendee.firstName.slice(0, 1)}
+                            </span>
+                            {attendee.firstName}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
                   ) : null}
                 </article>
               );
@@ -254,6 +381,80 @@ export function MemberDashboard({
           <p className="form-status" role="status">
             {message}
           </p>
+        </div>
+      </section>
+
+      <section id="history" className="dashboard-section">
+        <div className="wrap">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">My History</p>
+              <h2 className="section-title">
+                Your circle <em>over time.</em>
+              </h2>
+            </div>
+            <p className="section-copy">
+              Upcoming registrations, attended experiences, updates, and future
+              payment or purchase references will live here.
+            </p>
+          </div>
+          <div className="history-grid">
+            <div className="history-column">
+              <p className="eyebrow">Upcoming registrations</p>
+              {upcomingHistory.length ? (
+                upcomingHistory.map((reservation) => (
+                  <article className="history-card" key={reservation.id}>
+                    <span className="status-pill">
+                      {reservation.status === "CANCELLATION_REQUESTED"
+                        ? "Cancellation pending"
+                        : reservation.status.replace(/_/g, " ")}
+                    </span>
+                    <h3>{reservation.experienceTitle}</h3>
+                    <p className="meta">
+                      {formatExperienceDate(reservation.experienceDateTime)}
+                    </p>
+                    <p className="section-copy">{reservation.experienceLocation}</p>
+                  </article>
+                ))
+              ) : (
+                <p className="section-copy">No upcoming registrations yet.</p>
+              )}
+            </div>
+            <div className="history-column">
+              <p className="eyebrow">Past and updates</p>
+              {pastHistory.length ? (
+                pastHistory.map((reservation) => (
+                  <article className="history-card" key={reservation.id}>
+                    <span className="status-pill">
+                      {reservation.eventStatus === "POSTPONED"
+                        ? "Postponed"
+                        : reservation.eventStatus === "CANCELLED" ||
+                            reservation.status === "CANCELLED"
+                          ? "Cancelled"
+                          : "Attended"}
+                    </span>
+                    <h3>{reservation.experienceTitle}</h3>
+                    <p className="meta">
+                      {formatExperienceDate(reservation.experienceDateTime)}
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <p className="section-copy">Your attended experiences will appear here.</p>
+              )}
+            </div>
+            <div className="history-column">
+              <p className="eyebrow">Future records</p>
+              <article className="history-card muted-history-card">
+                <h3>Payments</h3>
+                <p className="section-copy">Payment references will appear here later.</p>
+              </article>
+              <article className="history-card muted-history-card">
+                <h3>Products</h3>
+                <p className="section-copy">Product purchases will appear here later.</p>
+              </article>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -334,6 +535,102 @@ export function MemberDashboard({
           </div>
         </div>
       </section>
+
+      <section className="dashboard-section" id="feedback">
+        <div className="wrap form-grid">
+          <div>
+            <p className="eyebrow">Member notes</p>
+            <h2 className="section-title">
+              Feedback, kept <em>personal.</em>
+            </h2>
+            <p className="section-copy">
+              Send experience feedback, product thoughts, technical issues,
+              suggestions, or a general message to the team.
+            </p>
+          </div>
+          <form className="form-panel" onSubmit={submitFeedback}>
+            <div className="field-grid">
+              <label className="field">
+                <span>Category</span>
+                <select name="category" className="input" defaultValue="GENERAL_MESSAGE">
+                  <option value="EXPERIENCE_FEEDBACK">Experience Feedback</option>
+                  <option value="PRODUCT_FEEDBACK">Product Feedback</option>
+                  <option value="TECHNICAL_ISSUE">Technical Issue</option>
+                  <option value="SUGGESTION">Suggestion</option>
+                  <option value="GENERAL_MESSAGE">General Message</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Subject</span>
+                <input name="subject" className="input" required />
+              </label>
+              <label className="field">
+                <span>Message</span>
+                <textarea name="message" className="textarea" required />
+              </label>
+              <button className="btn btn--ink btn--full">
+                Send Note <span className="arrow" />
+              </button>
+              <p className="form-status" role="status">
+                {feedbackMessage}
+              </p>
+            </div>
+          </form>
+        </div>
+        <div className="wrap feedback-thread-list">
+          {feedbackState.length ? (
+            feedbackState.map((thread) => (
+              <article className="invite-card" key={thread.id}>
+                <div className="invite-card__top">
+                  <div>
+                    <p className="eyebrow">{thread.category.replace(/_/g, " ")}</p>
+                    <h3>{thread.subject}</h3>
+                  </div>
+                  <span className="status-pill">{thread.status.replace(/_/g, " ")}</span>
+                </div>
+                {thread.messages.map((item) => (
+                  <p className="section-copy" key={item.id}>
+                    {item.isAdmin ? "The Curated Life: " : "You: "}
+                    {item.message}
+                  </p>
+                ))}
+              </article>
+            ))
+          ) : null}
+        </div>
+      </section>
+
+      {cancellationTarget ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Request cancellation">
+          <aside className="confirm-modal">
+            <p className="eyebrow">Request Cancellation</p>
+            <h2 className="panel-title">{cancellationTarget.experienceTitle}</h2>
+            <p className="section-copy">
+              Your place will remain held until an admin reviews the request.
+            </p>
+            <form className="field-grid" onSubmit={requestCancellation}>
+              <label className="field">
+                <span>Reason</span>
+                <input name="reason" className="input" required />
+              </label>
+              <label className="field">
+                <span>Optional note</span>
+                <textarea name="note" className="textarea" />
+              </label>
+              <div className="drawer-actions">
+                <button className="small-button bronze">Request Cancellation</button>
+                <button
+                  type="button"
+                  className="small-button secondary"
+                  onClick={() => setCancellationTarget(null)}
+                >
+                  Keep My Spot
+                </button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      ) : null}
     </>
   );
 }

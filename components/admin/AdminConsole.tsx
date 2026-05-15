@@ -36,18 +36,38 @@ type ExperienceView = {
   isVisible: boolean;
   isInviteOnly: boolean;
   isArchived: boolean;
+  status: string;
+  publishedAt?: string | null;
+  announcementSentAt?: string | null;
+  postponedAt?: string | null;
+  cancelledAt?: string | null;
+  cancellationReason?: string | null;
+  postponementMessage?: string | null;
+  visibilityType: string;
+  attendeeVisibilityEnabled: boolean;
+  selectedMemberIds: string[];
   confirmedCount: number;
+  waitlistedCount: number;
+  cancellationRequestCount: number;
   reservationCount: number;
   remainingSeats?: number | null;
 };
 
 type ExperienceApiView = Omit<
   ExperienceView,
-  "confirmedCount" | "reservationCount" | "remainingSeats"
+  | "confirmedCount"
+  | "waitlistedCount"
+  | "cancellationRequestCount"
+  | "reservationCount"
+  | "remainingSeats"
+  | "selectedMemberIds"
 > & {
   confirmedCount?: number;
+  waitlistedCount?: number;
+  cancellationRequestCount?: number;
   reservationCount?: number;
   remainingSeats?: number | null;
+  selectedMemberIds?: string[];
 };
 
 type ReservationView = {
@@ -58,6 +78,10 @@ type ReservationView = {
   memberEmail: string;
   experienceTitle: string;
   seatsTotal?: number | null;
+  cancellationRequestedAt?: string | null;
+  cancellationReason?: string | null;
+  cancellationNote?: string | null;
+  previousStatus?: string | null;
 };
 
 type ReferralView = {
@@ -89,6 +113,22 @@ type EmailLogView = {
   createdAt: string;
 };
 
+type FeedbackThreadView = {
+  id: string;
+  category: string;
+  subject: string;
+  status: string;
+  memberName: string;
+  memberEmail: string;
+  createdAt: string;
+  messages: Array<{
+    id: string;
+    isAdmin: boolean;
+    message: string;
+    createdAt: string;
+  }>;
+};
+
 type AdminConsoleProps = {
   requests: AccessRequestView[];
   experiences: ExperienceView[];
@@ -96,6 +136,7 @@ type AdminConsoleProps = {
   referrals: ReferralView[];
   members: MemberView[];
   emailLogs: EmailLogView[];
+  feedbackThreads: FeedbackThreadView[];
 };
 
 type AdminTab =
@@ -104,6 +145,7 @@ type AdminTab =
   | "members"
   | "events"
   | "reservations"
+  | "feedback"
   | "referrals"
   | "emails";
 
@@ -129,6 +171,10 @@ type ExperiencePayload = {
   isVisible: boolean;
   isInviteOnly: boolean;
   isArchived: boolean;
+  status: string;
+  visibilityType: string;
+  attendeeVisibilityEnabled: boolean;
+  selectedMemberIds: string[];
 };
 
 type ImageUploadStatus =
@@ -148,6 +194,7 @@ const adminTabs: Array<{ id: AdminTab; label: string }> = [
   { id: "members", label: "Members" },
   { id: "events", label: "Events" },
   { id: "reservations", label: "Reservations" },
+  { id: "feedback", label: "Feedback" },
   { id: "referrals", label: "Referrals" },
   { id: "emails", label: "Emails" },
 ];
@@ -292,6 +339,10 @@ function experiencePayloadFromForm(
     isVisible: formData.get("isVisible") === "on",
     isInviteOnly: formData.get("isInviteOnly") === "on",
     isArchived: includeArchived ? formData.get("isArchived") === "on" : false,
+    status: fieldValue(formData, "status") || "DRAFT",
+    visibilityType: fieldValue(formData, "visibilityType") || "ALL_MEMBERS",
+    attendeeVisibilityEnabled: formData.get("attendeeVisibilityEnabled") === "on",
+    selectedMemberIds: formData.getAll("selectedMemberIds").map(String),
   };
 }
 
@@ -308,6 +359,10 @@ function hydrateExperience(
     seatsTotal,
     confirmedCount,
     reservationCount: next.reservationCount ?? current.reservationCount,
+    waitlistedCount: next.waitlistedCount ?? current.waitlistedCount,
+    cancellationRequestCount:
+      next.cancellationRequestCount ?? current.cancellationRequestCount,
+    selectedMemberIds: next.selectedMemberIds ?? current.selectedMemberIds,
     remainingSeats:
       seatsTotal === null ? null : Math.max(seatsTotal - confirmedCount, 0),
   };
@@ -431,11 +486,13 @@ export function AdminConsole({
   referrals,
   members,
   emailLogs,
+  feedbackThreads,
 }: AdminConsoleProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
   const [requestState, setRequestState] = useState(requests);
   const [experienceState, setExperienceState] = useState(experiences);
   const [reservationState, setReservationState] = useState(reservations);
+  const [feedbackState, setFeedbackState] = useState(feedbackThreads);
   const [memberState, setMemberState] = useState(members);
   const [requestFilter, setRequestFilter] = useState("ALL");
   const [requestSearch, setRequestSearch] = useState("");
@@ -447,6 +504,11 @@ export function AdminConsole({
   const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
   const [isCreatingExperience, setIsCreatingExperience] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [lifecycleTarget, setLifecycleTarget] = useState<{
+    id: string;
+    action: "publish" | "unpublish" | "postpone" | "cancel" | "archive";
+  } | null>(null);
+  const [selectedFeedbackId, setSelectedFeedbackId] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
 
@@ -462,6 +524,12 @@ export function AdminConsole({
   );
   const deleteTarget = experienceState.find(
     (experience) => experience.id === deleteTargetId,
+  );
+  const lifecycleExperience = experienceState.find(
+    (experience) => experience.id === lifecycleTarget?.id,
+  );
+  const selectedFeedback = feedbackState.find(
+    (thread) => thread.id === selectedFeedbackId,
   );
 
   const filteredRequests = useMemo(() => {
@@ -500,13 +568,19 @@ export function AdminConsole({
     {
       label: "Live events",
       value: experienceState.filter(
-        (experience) => experience.isVisible && !experience.isArchived,
+        (experience) => experience.status === "PUBLISHED",
       ).length,
     },
     {
       label: "Reservation requests",
       value: reservationState.filter(
         (reservation) => reservation.status === "REQUESTED",
+      ).length,
+    },
+    {
+      label: "Cancellation requests",
+      value: reservationState.filter(
+        (reservation) => reservation.status === "CANCELLATION_REQUESTED",
       ).length,
     },
     {
@@ -680,7 +754,11 @@ export function AdminConsole({
     setExperienceState((current) =>
       current.map((experience) =>
         experience.id === id
-          ? hydrateExperience(experience, payload.experience)
+          ? {
+              ...hydrateExperience(experience, payload.experience),
+              selectedMemberIds:
+                data.selectedMemberIds ?? payload.experience.selectedMemberIds ?? experience.selectedMemberIds,
+            }
           : experience,
       ),
     );
@@ -727,8 +805,11 @@ export function AdminConsole({
         ...body.experience,
         seatsTotal,
         confirmedCount: 0,
+        waitlistedCount: 0,
+        cancellationRequestCount: 0,
         reservationCount: 0,
         remainingSeats: seatsTotal,
+        selectedMemberIds: body.experience.selectedMemberIds ?? [],
       },
     ]);
     form.reset();
@@ -751,6 +832,40 @@ export function AdminConsole({
     );
     setDeleteTargetId(null);
     showToast("success", "Event permanently deleted.");
+  }
+
+  async function runLifecycleAction(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (!lifecycleTarget || !lifecycleExperience) return;
+
+    const formData = event?.currentTarget ? new FormData(event.currentTarget) : null;
+    const action = lifecycleTarget.action;
+    const payload = await runJson<{ experience: ExperienceApiView }>(
+      `experience:${lifecycleTarget.id}:${action}`,
+      `/api/admin/experiences/${lifecycleTarget.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          postponementMessage: String(formData?.get("postponementMessage") ?? ""),
+          cancellationReason: String(formData?.get("cancellationReason") ?? ""),
+        }),
+      },
+      "Could not update event status.",
+    );
+
+    if (!payload) return;
+
+    setExperienceState((current) =>
+      current.map((experience) =>
+        experience.id === lifecycleTarget.id
+          ? hydrateExperience(experience, payload.experience)
+          : experience,
+      ),
+    );
+    setLifecycleTarget(null);
+    showToast("success", `Event ${prettyStatus(payload.experience.status).toLowerCase()}.`);
   }
 
   async function updateReservation(
@@ -778,6 +893,60 @@ export function AdminConsole({
       ),
     );
     showToast("success", "Reservation updated and email sent.");
+  }
+
+  async function reviewCancellation(
+    id: string,
+    action: "approve_cancellation" | "decline_cancellation",
+    adminReply = "",
+  ) {
+    const payload = await runJson<{ reservation: { status: string } }>(
+      `reservation:${id}:${action}`,
+      `/api/admin/reservations/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, adminReply }),
+      },
+      "Could not review cancellation.",
+    );
+
+    if (!payload) return;
+
+    setReservationState((current) =>
+      current.map((reservation) =>
+        reservation.id === id
+          ? { ...reservation, status: payload.reservation.status }
+          : reservation,
+      ),
+    );
+    showToast("success", "Cancellation review sent.");
+  }
+
+  async function updateFeedback(event: FormEvent<HTMLFormElement>, id: string) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = await runJson<{ thread: FeedbackThreadView }>(
+      `feedback:${id}:update`,
+      `/api/admin/feedback/${id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: fieldValue(formData, "status"),
+          reply: fieldValue(formData, "reply"),
+        }),
+      },
+      "Could not update feedback.",
+    );
+
+    if (!payload) return;
+
+    setFeedbackState((current) =>
+      current.map((thread) => (thread.id === id ? payload.thread : thread)),
+    );
+    setSelectedFeedbackId(null);
+    showToast("success", "Feedback updated.");
   }
 
   return (
@@ -988,13 +1157,19 @@ export function AdminConsole({
                       </span>
                     </span>
                     <span className="admin-row-meta event-row__meta">
-                      <span className={`status-pill ${experience.isVisible ? "status-approved" : "status-muted"}`}>
-                        {experience.isVisible ? "Visible" : "Hidden"}
+                      <span className={`status-pill status-${experience.status.toLowerCase()}`}>
+                        {prettyStatus(experience.status)}
                       </span>
-                      <span className={`status-pill ${experience.isArchived ? "status-declined" : "status-approved"}`}>
-                        {experience.isArchived ? "Archived" : "Active"}
+                      <span className="status-pill">
+                        {experience.visibilityType === "ALL_MEMBERS"
+                          ? "All Members"
+                          : experience.visibilityType === "SELECTED_MEMBERS"
+                            ? "Selected Members"
+                            : "Invite Only"}
                       </span>
                       <span>{seatsLabel(experience)}</span>
+                      <span>{experience.waitlistedCount} waitlisted</span>
+                      <span>{experience.cancellationRequestCount} cancellation requests</span>
                     </span>
                     <span className="admin-actions event-row__actions">
                       <button
@@ -1006,45 +1181,47 @@ export function AdminConsole({
                       </button>
                       <button
                         type="button"
-                        className="small-button secondary"
-                        disabled={isLoading(`experience:${experience.id}:visibility`)}
+                        className="small-button bronze"
                         onClick={() =>
-                          patchExperience(
-                            experience.id,
-                            { isVisible: !experience.isVisible },
-                            experience.isVisible
-                              ? "Event hidden from homepage."
-                              : "Event is visible on homepage.",
-                            "visibility",
-                          )
+                          setLifecycleTarget({
+                            id: experience.id,
+                            action:
+                              experience.status === "PUBLISHED"
+                                ? "unpublish"
+                                : "publish",
+                          })
                         }
                       >
-                        {isLoading(`experience:${experience.id}:visibility`)
-                          ? "Saving"
-                          : experience.isVisible
-                            ? "Hide"
-                            : "Show"}
+                        {experience.status === "PUBLISHED"
+                          ? "Unpublish"
+                          : "Publish & Notify"}
                       </button>
                       <button
                         type="button"
                         className="small-button secondary"
-                        disabled={isLoading(`experience:${experience.id}:archive`)}
                         onClick={() =>
-                          patchExperience(
-                            experience.id,
-                            { isArchived: !experience.isArchived },
-                            experience.isArchived
-                              ? "Event restored."
-                              : "Event archived.",
-                            "archive",
-                          )
+                          setLifecycleTarget({ id: experience.id, action: "postpone" })
                         }
                       >
-                        {isLoading(`experience:${experience.id}:archive`)
-                          ? "Saving"
-                          : experience.isArchived
-                            ? "Restore"
-                            : "Archive"}
+                        Postpone
+                      </button>
+                      <button
+                        type="button"
+                        className="small-button secondary"
+                        onClick={() =>
+                          setLifecycleTarget({ id: experience.id, action: "cancel" })
+                        }
+                      >
+                        Cancel Event
+                      </button>
+                      <button
+                        type="button"
+                        className="small-button secondary"
+                        onClick={() =>
+                          setLifecycleTarget({ id: experience.id, action: "archive" })
+                        }
+                      >
+                        Archive
                       </button>
                       <button
                         type="button"
@@ -1066,10 +1243,17 @@ export function AdminConsole({
                 <div>
                   <p className="eyebrow">Reservations</p>
                   <h2 id="admin-reservations-title" className="panel-title">
-                    Booking requests
+                    Reservation review
                   </h2>
                 </div>
-                <span className="status-pill">{reservationState.length}</span>
+                <span className="status-pill">
+                  {
+                    reservationState.filter(
+                      (item) => item.status === "CANCELLATION_REQUESTED",
+                    ).length
+                  }{" "}
+                  cancellation requests
+                </span>
               </div>
               <div className="admin-list">
                 {reservationState.length ? (
@@ -1085,39 +1269,75 @@ export function AdminConsole({
                         <span className={`status-pill status-${reservation.status.toLowerCase()}`}>
                           {prettyStatus(reservation.status)}
                         </span>
+                        {reservation.cancellationReason ? (
+                          <span>{reservation.cancellationReason}</span>
+                        ) : null}
                         <span>{compactDate(reservation.createdAt)}</span>
                       </span>
                       <span className="admin-actions">
-                        <button
-                          type="button"
-                          className="small-button bronze"
-                          disabled={isLoading(`reservation:${reservation.id}:CONFIRMED`)}
-                          onClick={() => updateReservation(reservation.id, "CONFIRMED")}
-                        >
-                          {isLoading(`reservation:${reservation.id}:CONFIRMED`)
-                            ? "Confirming"
-                            : "Confirm"}
-                        </button>
-                        <button
-                          type="button"
-                          className="small-button secondary"
-                          disabled={isLoading(`reservation:${reservation.id}:WAITLISTED`)}
-                          onClick={() => updateReservation(reservation.id, "WAITLISTED")}
-                        >
-                          {isLoading(`reservation:${reservation.id}:WAITLISTED`)
-                            ? "Saving"
-                            : "Waitlist"}
-                        </button>
-                        <button
-                          type="button"
-                          className="small-button secondary"
-                          disabled={isLoading(`reservation:${reservation.id}:CANCELLED`)}
-                          onClick={() => updateReservation(reservation.id, "CANCELLED")}
-                        >
-                          {isLoading(`reservation:${reservation.id}:CANCELLED`)
-                            ? "Cancelling"
-                            : "Cancel"}
-                        </button>
+                        {reservation.status === "CANCELLATION_REQUESTED" ? (
+                          <>
+                            <button
+                              type="button"
+                              className="small-button bronze"
+                              disabled={isLoading(`reservation:${reservation.id}:approve_cancellation`)}
+                              onClick={() =>
+                                reviewCancellation(
+                                  reservation.id,
+                                  "approve_cancellation",
+                                )
+                              }
+                            >
+                              Approve Cancellation
+                            </button>
+                            <button
+                              type="button"
+                              className="small-button secondary"
+                              disabled={isLoading(`reservation:${reservation.id}:decline_cancellation`)}
+                              onClick={() =>
+                                reviewCancellation(
+                                  reservation.id,
+                                  "decline_cancellation",
+                                )
+                              }
+                            >
+                              Decline Cancellation
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="small-button bronze"
+                              disabled={isLoading(`reservation:${reservation.id}:CONFIRMED`)}
+                              onClick={() => updateReservation(reservation.id, "CONFIRMED")}
+                            >
+                              {isLoading(`reservation:${reservation.id}:CONFIRMED`)
+                                ? "Confirming"
+                                : "Confirm"}
+                            </button>
+                            <button
+                              type="button"
+                              className="small-button secondary"
+                              disabled={isLoading(`reservation:${reservation.id}:WAITLISTED`)}
+                              onClick={() => updateReservation(reservation.id, "WAITLISTED")}
+                            >
+                              {isLoading(`reservation:${reservation.id}:WAITLISTED`)
+                                ? "Saving"
+                                : "Waitlist"}
+                            </button>
+                            <button
+                              type="button"
+                              className="small-button secondary"
+                              disabled={isLoading(`reservation:${reservation.id}:CANCELLED`)}
+                              onClick={() => updateReservation(reservation.id, "CANCELLED")}
+                            >
+                              {isLoading(`reservation:${reservation.id}:CANCELLED`)
+                                ? "Cancelling"
+                                : "Cancel"}
+                            </button>
+                          </>
+                        )}
                       </span>
                     </article>
                   ))
@@ -1158,6 +1378,48 @@ export function AdminConsole({
                   ))
                 ) : (
                   <p className="section-copy">No referrals yet.</p>
+                )}
+              </div>
+            </section>
+          ) : null}
+
+          {activeTab === "feedback" ? (
+            <section className="admin-panel" aria-labelledby="admin-feedback-title">
+              <div className="admin-panel__top">
+                <div>
+                  <p className="eyebrow">Feedback</p>
+                  <h2 id="admin-feedback-title" className="panel-title">
+                    Member notes
+                  </h2>
+                </div>
+                <span className="status-pill">{feedbackState.length}</span>
+              </div>
+              <div className="admin-list">
+                {feedbackState.length ? (
+                  feedbackState.map((thread) => (
+                    <button
+                      className="admin-list-row"
+                      key={thread.id}
+                      type="button"
+                      onClick={() => setSelectedFeedbackId(thread.id)}
+                    >
+                      <span className="admin-row-main">
+                        <strong>{thread.subject}</strong>
+                        <span>
+                          {thread.memberName} · {thread.memberEmail}
+                        </span>
+                      </span>
+                      <span className="admin-row-meta">
+                        <span className={`status-pill status-${thread.status.toLowerCase()}`}>
+                          {prettyStatus(thread.status)}
+                        </span>
+                        <span>{thread.category.replace(/_/g, " ")}</span>
+                        <span>{compactDate(thread.createdAt)}</span>
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="section-copy">No feedback yet.</p>
                 )}
               </div>
             </section>
@@ -1280,6 +1542,61 @@ export function AdminConsole({
         </div>
       ) : null}
 
+      {selectedFeedback ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Feedback details">
+          <aside className="admin-drawer">
+            <div className="drawer-head">
+              <div>
+                <p className="eyebrow">Feedback</p>
+                <h2 className="panel-title">{selectedFeedback.subject}</h2>
+              </div>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setSelectedFeedbackId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="detail-grid">
+              <p><strong>Member</strong><span>{selectedFeedback.memberName}</span></p>
+              <p><strong>Email</strong><span>{selectedFeedback.memberEmail}</span></p>
+              <p><strong>Category</strong><span>{selectedFeedback.category.replace(/_/g, " ")}</span></p>
+              <p><strong>Status</strong><span>{prettyStatus(selectedFeedback.status)}</span></p>
+            </div>
+            <div className="drawer-section">
+              {selectedFeedback.messages.map((message) => (
+                <p className="section-copy" key={message.id}>
+                  <strong>{message.isAdmin ? "Admin" : selectedFeedback.memberName}:</strong>{" "}
+                  {message.message}
+                </p>
+              ))}
+            </div>
+            <form className="field-grid drawer-form" onSubmit={(event) => updateFeedback(event, selectedFeedback.id)}>
+              <label className="field">
+                <span>Status</span>
+                <select name="status" className="input" defaultValue={selectedFeedback.status}>
+                  <option value="OPEN">Open</option>
+                  <option value="UNDER_REVIEW">Under Review</option>
+                  <option value="REPLIED">Replied</option>
+                  <option value="CLOSED">Closed</option>
+                </select>
+              </label>
+              <label className="field full-field">
+                <span>Reply</span>
+                <textarea name="reply" className="textarea" />
+              </label>
+              <button
+                className="small-button bronze full-field"
+                disabled={isLoading(`feedback:${selectedFeedback.id}:update`)}
+              >
+                {isLoading(`feedback:${selectedFeedback.id}:update`) ? "Saving" : "Save Reply"}
+              </button>
+            </form>
+          </aside>
+        </div>
+      ) : null}
+
       {editingMember ? (
         <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Edit member">
           <aside className="admin-drawer">
@@ -1390,9 +1707,45 @@ export function AdminConsole({
               <label className="field"><span>Host name</span><input name="hostName" className="input" defaultValue={editingExperience.hostName} required /></label>
               <label className="field"><span>Host title</span><input name="hostTitle" className="input" defaultValue={editingExperience.hostTitle ?? ""} /></label>
               <label className="field full-field"><span>Host bio</span><textarea name="hostBio" className="textarea" defaultValue={editingExperience.hostBio ?? ""} /></label>
+              <label className="field">
+                <span>Status</span>
+                <select name="status" className="input" defaultValue={editingExperience.status}>
+                  <option value="DRAFT">Draft</option>
+                  <option value="PUBLISHED">Published</option>
+                  <option value="POSTPONED">Postponed</option>
+                  <option value="CANCELLED">Cancelled</option>
+                  <option value="ARCHIVED">Archived</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Audience</span>
+                <select name="visibilityType" className="input" defaultValue={editingExperience.visibilityType}>
+                  <option value="ALL_MEMBERS">All Members</option>
+                  <option value="SELECTED_MEMBERS">Selected Members</option>
+                  <option value="INVITE_ONLY">Invite Only</option>
+                </select>
+              </label>
+              <label className="field full-field">
+                <span>Selected members</span>
+                <select
+                  name="selectedMemberIds"
+                  className="input"
+                  multiple
+                  defaultValue={editingExperience.selectedMemberIds}
+                >
+                  {memberState
+                    .filter((member) => member.accessStatus === "APPROVED")
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.fullName} · {member.email}
+                      </option>
+                    ))}
+                </select>
+              </label>
               <label className="choice"><input name="isVisible" type="checkbox" defaultChecked={editingExperience.isVisible} /><span>Visible</span></label>
               <label className="choice"><input name="isInviteOnly" type="checkbox" defaultChecked={editingExperience.isInviteOnly} /><span>Invite-only</span></label>
               <label className="choice"><input name="isArchived" type="checkbox" defaultChecked={editingExperience.isArchived} /><span>Archived</span></label>
+              <label className="choice"><input name="attendeeVisibilityEnabled" type="checkbox" defaultChecked={editingExperience.attendeeVisibilityEnabled} /><span>Attendee visibility</span></label>
               <button
                 className="small-button bronze full-field"
                 disabled={isLoading(`experience:${editingExperience.id}:save`)}
@@ -1432,14 +1785,97 @@ export function AdminConsole({
               <label className="field"><span>Host name</span><input name="hostName" className="input" required /></label>
               <label className="field"><span>Host title</span><input name="hostTitle" className="input" /></label>
               <label className="field full-field"><span>Host bio</span><textarea name="hostBio" className="textarea" /></label>
-              <label className="choice"><input name="isVisible" type="checkbox" defaultChecked /><span>Visible</span></label>
+              <label className="field">
+                <span>Status</span>
+                <select name="status" className="input" defaultValue="DRAFT">
+                  <option value="DRAFT">Draft</option>
+                  <option value="PUBLISHED">Published</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Audience</span>
+                <select name="visibilityType" className="input" defaultValue="ALL_MEMBERS">
+                  <option value="ALL_MEMBERS">All Members</option>
+                  <option value="SELECTED_MEMBERS">Selected Members</option>
+                  <option value="INVITE_ONLY">Invite Only</option>
+                </select>
+              </label>
+              <label className="field full-field">
+                <span>Selected members</span>
+                <select name="selectedMemberIds" className="input" multiple>
+                  {memberState
+                    .filter((member) => member.accessStatus === "APPROVED")
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.fullName} · {member.email}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="choice"><input name="isVisible" type="checkbox" /><span>Visible</span></label>
               <label className="choice"><input name="isInviteOnly" type="checkbox" defaultChecked /><span>Invite-only</span></label>
+              <label className="choice"><input name="attendeeVisibilityEnabled" type="checkbox" defaultChecked /><span>Attendee visibility</span></label>
               <button
                 className="small-button bronze full-field"
                 disabled={isLoading("experience:create")}
               >
                 {isLoading("experience:create") ? "Creating" : "Create event"}
               </button>
+            </form>
+          </aside>
+        </div>
+      ) : null}
+
+      {lifecycleTarget && lifecycleExperience ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Confirm event status update">
+          <aside className="confirm-modal">
+            <p className="eyebrow">Event Status</p>
+            <h2 className="panel-title">
+              {prettyStatus(lifecycleTarget.action)} {lifecycleExperience.title}?
+            </h2>
+            <p className="section-copy">
+              {lifecycleTarget.action === "publish"
+                ? "This will publish the event and notify eligible members only once."
+                : lifecycleTarget.action === "postpone"
+                  ? "This will stop new registrations and notify affected members."
+                  : lifecycleTarget.action === "cancel"
+                    ? "This will stop new registrations, keep the event in history, and notify affected members."
+                    : lifecycleTarget.action === "archive"
+                      ? "This will remove the event from active views while keeping its history."
+                      : "This will return the event to draft."}
+            </p>
+            <form className="field-grid" onSubmit={runLifecycleAction}>
+              {lifecycleTarget.action === "postpone" ? (
+                <label className="field">
+                  <span>Postponement message</span>
+                  <textarea name="postponementMessage" className="textarea" required />
+                </label>
+              ) : null}
+              {lifecycleTarget.action === "cancel" ? (
+                <label className="field">
+                  <span>Cancellation reason</span>
+                  <textarea name="cancellationReason" className="textarea" required />
+                </label>
+              ) : null}
+              <div className="drawer-actions">
+                <button
+                  className={
+                    lifecycleTarget.action === "cancel"
+                      ? "small-button danger"
+                      : "small-button bronze"
+                  }
+                  disabled={isLoading(`experience:${lifecycleTarget.id}:${lifecycleTarget.action}`)}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="small-button secondary"
+                  onClick={() => setLifecycleTarget(null)}
+                >
+                  Keep Editing
+                </button>
+              </div>
             </form>
           </aside>
         </div>
@@ -1466,17 +1902,12 @@ export function AdminConsole({
                   type="button"
                   className="small-button bronze"
                   disabled={isLoading(`experience:${deleteTarget.id}:archive`)}
-                  onClick={async () => {
-                    const archived = await patchExperience(
-                      deleteTarget.id,
-                      { isArchived: true },
-                      "Event archived instead of deleted.",
-                      "archive",
-                    );
-                    if (archived) setDeleteTargetId(null);
+                  onClick={() => {
+                    setLifecycleTarget({ id: deleteTarget.id, action: "archive" });
+                    setDeleteTargetId(null);
                   }}
                 >
-                  {isLoading(`experience:${deleteTarget.id}:archive`) ? "Archiving" : "Archive event"}
+                  Archive event
                 </button>
               ) : (
                 <button

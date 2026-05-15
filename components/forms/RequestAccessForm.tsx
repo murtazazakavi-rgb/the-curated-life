@@ -144,7 +144,7 @@ export function RequestAccessForm({ defaultReferredBy = "" }: RequestAccessFormP
         </div>
 
         <button className="btn btn--ink btn--full" disabled={status === "submitting"}>
-          {status === "submitting" ? "Sending request" : "Submit Request"}
+          {status === "submitting" ? "Sending request" : "Send Request"}
           <span className="arrow" />
         </button>
         <p className="form-status" role="status">

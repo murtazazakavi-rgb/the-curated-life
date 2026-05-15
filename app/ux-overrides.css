@@ -267,7 +267,9 @@
 
 .status-pill.status-approved,
 .status-pill.status-confirmed,
-.status-pill.status-sent {
+.status-pill.status-sent,
+.status-pill.status-published,
+.status-pill.status-replied {
   background: rgba(74, 85, 72, 0.12);
   color: var(--olive);
 }
@@ -275,7 +277,10 @@
 .status-pill.status-pending,
 .status-pill.status-requested,
 .status-pill.status-waitlisted,
-.status-pill.status-skipped {
+.status-pill.status-skipped,
+.status-pill.status-draft,
+.status-pill.status-under_review,
+.status-pill.status-cancellation_requested {
   background: rgba(160, 124, 91, 0.16);
   color: var(--bronze);
 }
@@ -292,6 +297,13 @@
   color: rgba(15, 15, 15, 0.58);
 }
 
+.status-pill.status-archived,
+.status-pill.status-closed,
+.status-pill.status-postponed {
+  background: rgba(15, 15, 15, 0.08);
+  color: rgba(15, 15, 15, 0.62);
+}
+
 .event-list {
   gap: 12px;
 }
@@ -303,6 +315,83 @@
 .small-button.danger {
   background: #763830;
   color: var(--cream);
+}
+
+.history-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.history-column {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.history-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 18px;
+  background: rgba(255, 250, 242, 0.72);
+  padding: 18px;
+  box-shadow: var(--shadow-soft);
+}
+
+.history-card h3 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.42rem;
+  font-weight: 300;
+  line-height: 1.15;
+}
+
+.muted-history-card {
+  background: rgba(231, 222, 208, 0.42);
+  box-shadow: none;
+}
+
+.attendee-section {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+
+.attendee-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.attendee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 6px 10px 6px 6px;
+  color: rgba(15, 15, 15, 0.72);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.attendee-avatar {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--cream);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.feedback-thread-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
 }
 
 .small-button:disabled,
@@ -519,6 +608,10 @@
 
   .admin-toolbar {
     grid-template-columns: minmax(0, 1fr) 220px;
+  }
+
+  .history-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .admin-list-row {

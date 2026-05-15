@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { sendTransactionalEmail } from "@/lib/email/send";
 import {
+  cancellationApprovedEmail,
+  cancellationDeclinedEmail,
   reservationCancelledEmail,
   reservationConfirmedEmail,
   reservationWaitlistedEmail,
@@ -38,6 +40,81 @@ export async function PATCH(
 
   if (!reservation) {
     return NextResponse.json({ error: "Reservation not found." }, { status: 404 });
+  }
+
+  if (parsed.data.action === "approve_cancellation") {
+    if (reservation.status !== ReservationStatus.CANCELLATION_REQUESTED) {
+      return NextResponse.json(
+        { error: "This reservation is not awaiting cancellation review." },
+        { status: 400 },
+      );
+    }
+
+    const updated = await prisma.reservation.update({
+      where: { id },
+      data: {
+        status: ReservationStatus.CANCELLED,
+        adminCancellationReply: parsed.data.adminReply || null,
+      },
+    });
+
+    const email = cancellationApprovedEmail({
+      name: reservation.user.fullName,
+      experienceTitle: reservation.experience.title,
+    });
+
+    await sendTransactionalEmail({
+      to: reservation.user.email,
+      templateKey: "cancellation_approved",
+      ...email,
+    }).catch((error) => {
+      console.error("cancellation approved email failed", error);
+    });
+
+    return NextResponse.json({ ok: true, reservation: updated });
+  }
+
+  if (parsed.data.action === "decline_cancellation") {
+    if (reservation.status !== ReservationStatus.CANCELLATION_REQUESTED) {
+      return NextResponse.json(
+        { error: "This reservation is not awaiting cancellation review." },
+        { status: 400 },
+      );
+    }
+
+    const restoredStatus =
+      reservation.previousStatus &&
+      reservation.previousStatus !== ReservationStatus.CANCELLATION_REQUESTED
+        ? reservation.previousStatus
+        : ReservationStatus.CONFIRMED;
+
+    const updated = await prisma.reservation.update({
+      where: { id },
+      data: {
+        status: restoredStatus,
+        adminCancellationReply: parsed.data.adminReply || null,
+      },
+    });
+
+    const email = cancellationDeclinedEmail({
+      name: reservation.user.fullName,
+      experienceTitle: reservation.experience.title,
+      reply: parsed.data.adminReply,
+    });
+
+    await sendTransactionalEmail({
+      to: reservation.user.email,
+      templateKey: "cancellation_declined",
+      ...email,
+    }).catch((error) => {
+      console.error("cancellation declined email failed", error);
+    });
+
+    return NextResponse.json({ ok: true, reservation: updated });
+  }
+
+  if (!parsed.data.status) {
+    return NextResponse.json({ error: "Unknown reservation action." }, { status: 400 });
   }
 
   if (parsed.data.status === ReservationStatus.CONFIRMED) {

@@ -9,7 +9,12 @@ import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { createPasswordSetupToken } from "@/lib/auth/password";
 import { sendTransactionalEmail } from "@/lib/email/send";
 import { siteUrl } from "@/lib/email/templates/base";
-import { AccessStatus, UserRole } from "@/lib/generated/prisma/enums";
+import {
+  AccessStatus,
+  EventStatus,
+  EventVisibility,
+  UserRole,
+} from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
 import { accessDecisionSchema } from "@/lib/validators/access";
 
@@ -98,9 +103,26 @@ export async function PATCH(
     });
 
     const setupToken = await createPasswordSetupToken(user.id);
+    const liveExperiences = await prisma.experience.findMany({
+      where: {
+        status: EventStatus.PUBLISHED,
+        visibilityType: EventVisibility.ALL_MEMBERS,
+        isVisible: true,
+        isArchived: false,
+        dateTime: { gte: new Date() },
+      },
+      orderBy: { dateTime: "asc" },
+      take: 3,
+      select: {
+        title: true,
+        dateTime: true,
+        location: true,
+      },
+    });
     const email = accessApprovedSetPasswordEmail({
       name: accessRequest.fullName,
       setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
+      experiences: liveExperiences,
     });
 
     await sendTransactionalEmail({
