@@ -15,6 +15,11 @@ import {
   EventVisibility,
   UserRole,
 } from "@/lib/generated/prisma/enums";
+import {
+  getTableColumns,
+  hasEventLifecycleSchema,
+  hasPasswordSetupSchema,
+} from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 import { accessDecisionSchema } from "@/lib/validators/access";
 
@@ -49,10 +54,24 @@ export async function PATCH(
   const prisma = getPrisma();
   const existingRequest = await prisma.accessRequest.findUnique({
     where: { id },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      referredBy: true,
+      status: true,
+    },
   });
 
   if (!existingRequest) {
     return NextResponse.json({ error: "Access request not found." }, { status: 404 });
+  }
+
+  if (status === AccessStatus.APPROVED && !(await hasPasswordSetupSchema(prisma))) {
+    return NextResponse.json(
+      { error: "Approving members needs the password setup database migration." },
+      { status: 503 },
+    );
   }
 
   const previousUser = await prisma.user.findUnique({
@@ -71,15 +90,38 @@ export async function PATCH(
     );
   }
 
-  const accessRequest = await prisma.accessRequest.update({
-    where: { id },
-    data: {
-      status: parsed.data.action === "resend_setup" ? undefined : status,
-      reviewedAt: parsed.data.action === "resend_setup" ? undefined : new Date(),
-      reviewedById: parsed.data.action === "resend_setup" ? undefined : admin.id,
-      adminNote: parsed.data.adminNote || undefined,
-    },
-  });
+  const accessRequestColumns = await getTableColumns(prisma, "AccessRequest");
+  const reviewData: {
+    status?: AccessStatus;
+    reviewedAt?: Date;
+    reviewedById?: string;
+    adminNote?: string;
+  } = {};
+
+  if (parsed.data.action !== "resend_setup") {
+    reviewData.status = status;
+    if (accessRequestColumns.has("reviewedAt")) reviewData.reviewedAt = new Date();
+    if (accessRequestColumns.has("reviewedById")) reviewData.reviewedById = admin.id;
+  }
+
+  if (parsed.data.adminNote && accessRequestColumns.has("adminNote")) {
+    reviewData.adminNote = parsed.data.adminNote;
+  }
+
+  const accessRequest =
+    Object.keys(reviewData).length > 0
+      ? await prisma.accessRequest.update({
+          where: { id },
+          data: reviewData,
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            referredBy: true,
+            status: true,
+          },
+        })
+      : existingRequest;
 
   if (status === AccessStatus.APPROVED) {
     const user = await prisma.user.upsert({
@@ -100,25 +142,41 @@ export async function PATCH(
         role: isAdminEmail(accessRequest.email) ? UserRole.ADMIN : UserRole.MEMBER,
         referredBy: accessRequest.referredBy,
       },
+      select: { id: true },
     });
 
     const setupToken = await createPasswordSetupToken(user.id);
-    const liveExperiences = await prisma.experience.findMany({
-      where: {
-        status: EventStatus.PUBLISHED,
-        visibilityType: EventVisibility.ALL_MEMBERS,
-        isVisible: true,
-        isArchived: false,
-        dateTime: { gte: new Date() },
-      },
-      orderBy: { dateTime: "asc" },
-      take: 3,
-      select: {
-        title: true,
-        dateTime: true,
-        location: true,
-      },
-    });
+    const lifecycleReady = await hasEventLifecycleSchema(prisma);
+    const liveExperiences = lifecycleReady
+      ? await prisma.experience.findMany({
+          where: {
+            status: EventStatus.PUBLISHED,
+            visibilityType: EventVisibility.ALL_MEMBERS,
+            isVisible: true,
+            isArchived: false,
+            dateTime: { gte: new Date() },
+          },
+          orderBy: { dateTime: "asc" },
+          take: 3,
+          select: {
+            title: true,
+            dateTime: true,
+            location: true,
+          },
+        })
+      : await prisma.experience.findMany({
+          where: {
+            isVisible: true,
+            dateTime: { gte: new Date() },
+          },
+          orderBy: { dateTime: "asc" },
+          take: 3,
+          select: {
+            title: true,
+            dateTime: true,
+            location: true,
+          },
+        });
     const email = accessApprovedSetPasswordEmail({
       name: accessRequest.fullName,
       setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),

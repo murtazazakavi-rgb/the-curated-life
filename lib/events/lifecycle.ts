@@ -6,6 +6,16 @@ import {
 } from "@/lib/generated/prisma/enums";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
+export async function getTableColumns(prisma: PrismaClient, tableName: string) {
+  const columns = await prisma.$queryRaw<Array<{ column_name: string }>>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = ${tableName}
+  `;
+
+  return new Set(columns.map((column) => column.column_name));
+}
+
 export function lifecycleFlags(status: EventStatus) {
   return {
     isVisible: status === EventStatus.PUBLISHED,
@@ -60,6 +70,23 @@ export async function hasFeedbackSchema(prisma: PrismaClient) {
     return Boolean(result?.ready);
   } catch (error) {
     console.error("feedback schema check failed", error);
+    return false;
+  }
+}
+
+export async function hasPasswordSetupSchema(prisma: PrismaClient) {
+  try {
+    const [result] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_name = 'PasswordSetupToken'
+      ) AS ready
+    `;
+
+    return Boolean(result?.ready);
+  } catch (error) {
+    console.error("password setup schema check failed", error);
     return false;
   }
 }

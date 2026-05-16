@@ -8,6 +8,7 @@ import {
   reservationConfirmedEmail,
   reservationWaitlistedEmail,
 } from "@/lib/email/templates";
+import { hasEventLifecycleSchema } from "@/lib/events/lifecycle";
 import { ReservationStatus } from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
 import { reservationDecisionSchema } from "@/lib/validators/access";
@@ -33,9 +34,28 @@ export async function PATCH(
 
   const { id } = await context.params;
   const prisma = getPrisma();
+  const lifecycleReady = await hasEventLifecycleSchema(prisma);
   const reservation = await prisma.reservation.findUnique({
     where: { id },
-    include: { user: true, experience: true },
+    select: {
+      id: true,
+      userId: true,
+      experienceId: true,
+      status: true,
+      previousStatus: lifecycleReady,
+      user: {
+        select: {
+          fullName: true,
+          email: true,
+        },
+      },
+      experience: {
+        select: {
+          title: true,
+          seatsTotal: true,
+        },
+      },
+    },
   });
 
   if (!reservation) {
@@ -43,6 +63,13 @@ export async function PATCH(
   }
 
   if (parsed.data.action === "approve_cancellation") {
+    if (!lifecycleReady) {
+      return NextResponse.json(
+        { error: "Cancellation review needs the latest database migration." },
+        { status: 503 },
+      );
+    }
+
     if (reservation.status !== ReservationStatus.CANCELLATION_REQUESTED) {
       return NextResponse.json(
         { error: "This reservation is not awaiting cancellation review." },
@@ -56,6 +83,7 @@ export async function PATCH(
         status: ReservationStatus.CANCELLED,
         adminCancellationReply: parsed.data.adminReply || null,
       },
+      select: { id: true, status: true },
     });
 
     const email = cancellationApprovedEmail({
@@ -75,6 +103,13 @@ export async function PATCH(
   }
 
   if (parsed.data.action === "decline_cancellation") {
+    if (!lifecycleReady) {
+      return NextResponse.json(
+        { error: "Cancellation review needs the latest database migration." },
+        { status: 503 },
+      );
+    }
+
     if (reservation.status !== ReservationStatus.CANCELLATION_REQUESTED) {
       return NextResponse.json(
         { error: "This reservation is not awaiting cancellation review." },
@@ -94,6 +129,7 @@ export async function PATCH(
         status: restoredStatus,
         adminCancellationReply: parsed.data.adminReply || null,
       },
+      select: { id: true, status: true },
     });
 
     const email = cancellationDeclinedEmail({
@@ -140,6 +176,7 @@ export async function PATCH(
   const updated = await prisma.reservation.update({
     where: { id },
     data: { status: parsed.data.status },
+    select: { id: true, status: true },
   });
 
   const template =
