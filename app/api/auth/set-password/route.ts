@@ -36,23 +36,24 @@ export async function POST(request: Request) {
   const passwordHash = await hashPassword(parsed.data.password);
   const prisma = getPrisma();
 
-  await prisma.$transaction([
-    prisma.user.update({
+  await prisma.$transaction(async (tx) => {
+    await tx.user.update({
       where: { id: token.userId },
       data: {
         passwordHash,
         passwordSetAt: new Date(),
         emailVerified: true,
       },
-    }),
-    prisma.passwordSetupToken.updateMany({
+    });
+
+    await tx.passwordSetupToken.updateMany({
       where: {
         tokenHash: hashOpaqueToken(parsed.data.token),
         usedAt: null,
       },
       data: { usedAt: new Date() },
-    }),
-  ]);
+    });
+  });
 
   const user = await prisma.user.findUniqueOrThrow({ where: { id: token.userId } });
   const response = NextResponse.json({

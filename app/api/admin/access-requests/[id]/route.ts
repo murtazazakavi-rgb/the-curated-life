@@ -6,7 +6,7 @@ import {
 } from "@/lib/email/templates";
 import { isAdminEmail } from "@/lib/admin/access";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
-import { createPasswordSetupToken } from "@/lib/auth/password";
+import { createPasswordSetupTokenWithClient } from "@/lib/auth/password";
 import { sendTransactionalEmail } from "@/lib/email/send";
 import { siteUrl } from "@/lib/email/templates/base";
 import {
@@ -24,6 +24,32 @@ import { getPrisma } from "@/lib/prisma/client";
 import { accessDecisionSchema } from "@/lib/validators/access";
 
 export const runtime = "nodejs";
+
+type ReviewedMember = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: UserRole;
+  accessStatus: AccessStatus;
+  passwordSetAt?: Date | null;
+  suspendedAt?: Date | null;
+  createdAt: Date;
+};
+
+function serializeMember(member: ReviewedMember | null) {
+  if (!member) return null;
+
+  return {
+    id: member.id,
+    fullName: member.fullName,
+    email: member.email,
+    role: member.role,
+    accessStatus: member.accessStatus,
+    passwordSetAt: member.passwordSetAt?.toISOString() ?? null,
+    suspendedAt: member.suspendedAt?.toISOString() ?? null,
+    createdAt: member.createdAt.toISOString(),
+  };
+}
 
 export async function PATCH(
   request: Request,
@@ -52,180 +78,243 @@ export async function PATCH(
 
   const status = statusByAction[parsed.data.action];
   const prisma = getPrisma();
-  const existingRequest = await prisma.accessRequest.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      fullName: true,
-      email: true,
-      referredBy: true,
-      status: true,
-    },
-  });
 
-  if (!existingRequest) {
-    return NextResponse.json({ error: "Access request not found." }, { status: 404 });
-  }
+  try {
+    const existingRequest = await prisma.accessRequest.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        referredBy: true,
+        status: true,
+      },
+    });
 
-  if (status === AccessStatus.APPROVED && !(await hasPasswordSetupSchema(prisma))) {
-    return NextResponse.json(
-      { error: "Approving members needs the password setup database migration." },
-      { status: 503 },
-    );
-  }
+    if (!existingRequest) {
+      return NextResponse.json(
+        { error: "Access request not found." },
+        { status: 404 },
+      );
+    }
 
-  const previousUser = await prisma.user.findUnique({
-    where: { email: existingRequest.email },
-    select: { role: true },
-  });
+    if (
+      status === AccessStatus.APPROVED &&
+      !(await hasPasswordSetupSchema(prisma))
+    ) {
+      return NextResponse.json(
+        { error: "Approving members needs the password setup database migration." },
+        { status: 503 },
+      );
+    }
 
-  if (
-    parsed.data.action === "resend_setup" &&
-    existingRequest.status !== AccessStatus.APPROVED &&
-    !previousUser
-  ) {
-    return NextResponse.json(
-      { error: "Setup email can only be resent after approval." },
-      { status: 400 },
-    );
-  }
+    const previousUser = await prisma.user.findUnique({
+      where: { email: existingRequest.email },
+      select: { role: true },
+    });
 
-  const accessRequestColumns = await getTableColumns(prisma, "AccessRequest");
-  const reviewData: {
-    status?: AccessStatus;
-    reviewedAt?: Date;
-    reviewedById?: string;
-    adminNote?: string;
-  } = {};
+    if (
+      parsed.data.action === "resend_setup" &&
+      existingRequest.status !== AccessStatus.APPROVED &&
+      !previousUser
+    ) {
+      return NextResponse.json(
+        { error: "Setup email can only be resent after approval." },
+        { status: 400 },
+      );
+    }
 
-  if (parsed.data.action !== "resend_setup") {
-    reviewData.status = status;
-    if (accessRequestColumns.has("reviewedAt")) reviewData.reviewedAt = new Date();
-    if (accessRequestColumns.has("reviewedById")) reviewData.reviewedById = admin.id;
-  }
+    const accessRequestColumns = await getTableColumns(prisma, "AccessRequest");
+    const reviewData: {
+      status?: AccessStatus;
+      reviewedAt?: Date;
+      reviewedById?: string;
+      adminNote?: string;
+    } = {};
 
-  if (parsed.data.adminNote && accessRequestColumns.has("adminNote")) {
-    reviewData.adminNote = parsed.data.adminNote;
-  }
+    if (parsed.data.action !== "resend_setup") {
+      reviewData.status = status;
+      if (accessRequestColumns.has("reviewedAt")) reviewData.reviewedAt = new Date();
+      if (accessRequestColumns.has("reviewedById")) reviewData.reviewedById = admin.id;
+    }
 
-  const accessRequest =
-    Object.keys(reviewData).length > 0
-      ? await prisma.accessRequest.update({
-          where: { id },
-          data: reviewData,
+    if (parsed.data.adminNote && accessRequestColumns.has("adminNote")) {
+      reviewData.adminNote = parsed.data.adminNote;
+    }
+
+    let setupToken: string | null = null;
+    let reviewedMember: ReviewedMember | null = null;
+
+    const accessRequest = await prisma.$transaction(async (tx) => {
+      const nextRequest =
+        Object.keys(reviewData).length > 0
+          ? await tx.accessRequest.update({
+              where: { id },
+              data: reviewData,
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                referredBy: true,
+                status: true,
+              },
+            })
+          : existingRequest;
+
+      if (status === AccessStatus.APPROVED) {
+        const user = await tx.user.upsert({
+          where: { email: nextRequest.email },
+          update: {
+            fullName: nextRequest.fullName,
+            accessStatus: AccessStatus.APPROVED,
+            role:
+              isAdminEmail(nextRequest.email) ||
+              previousUser?.role === UserRole.ADMIN
+                ? UserRole.ADMIN
+                : UserRole.MEMBER,
+            referredBy: nextRequest.referredBy,
+          },
+          create: {
+            email: nextRequest.email,
+            fullName: nextRequest.fullName,
+            accessStatus: AccessStatus.APPROVED,
+            role: isAdminEmail(nextRequest.email)
+              ? UserRole.ADMIN
+              : UserRole.MEMBER,
+            referredBy: nextRequest.referredBy,
+          },
           select: {
             id: true,
             fullName: true,
             email: true,
-            referredBy: true,
-            status: true,
-          },
-        })
-      : existingRequest;
-
-  if (status === AccessStatus.APPROVED) {
-    const user = await prisma.user.upsert({
-      where: { email: accessRequest.email },
-      update: {
-        fullName: accessRequest.fullName,
-        accessStatus: AccessStatus.APPROVED,
-        role:
-          isAdminEmail(accessRequest.email) || previousUser?.role === UserRole.ADMIN
-            ? UserRole.ADMIN
-            : UserRole.MEMBER,
-        referredBy: accessRequest.referredBy,
-      },
-      create: {
-        email: accessRequest.email,
-        fullName: accessRequest.fullName,
-        accessStatus: AccessStatus.APPROVED,
-        role: isAdminEmail(accessRequest.email) ? UserRole.ADMIN : UserRole.MEMBER,
-        referredBy: accessRequest.referredBy,
-      },
-      select: { id: true },
-    });
-
-    const setupToken = await createPasswordSetupToken(user.id);
-    const lifecycleReady = await hasEventLifecycleSchema(prisma);
-    const liveExperiences = lifecycleReady
-      ? await prisma.experience.findMany({
-          where: {
-            status: EventStatus.PUBLISHED,
-            visibilityType: EventVisibility.ALL_MEMBERS,
-            isVisible: true,
-            isArchived: false,
-            dateTime: { gte: new Date() },
-          },
-          orderBy: { dateTime: "asc" },
-          take: 3,
-          select: {
-            title: true,
-            dateTime: true,
-            location: true,
-          },
-        })
-      : await prisma.experience.findMany({
-          where: {
-            isVisible: true,
-            dateTime: { gte: new Date() },
-          },
-          orderBy: { dateTime: "asc" },
-          take: 3,
-          select: {
-            title: true,
-            dateTime: true,
-            location: true,
+            role: true,
+            accessStatus: true,
+            passwordSetAt: true,
+            suspendedAt: true,
+            createdAt: true,
           },
         });
-    const email = accessApprovedSetPasswordEmail({
-      name: accessRequest.fullName,
-      setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
-      experiences: liveExperiences,
+
+        setupToken = await createPasswordSetupTokenWithClient(tx, user.id);
+        reviewedMember = user;
+      }
+
+      if (status === AccessStatus.DECLINED) {
+        await tx.user.updateMany({
+          where: { email: nextRequest.email },
+          data: { accessStatus: AccessStatus.DECLINED },
+        });
+      }
+
+      if (status === AccessStatus.WAITLISTED) {
+        await tx.user.updateMany({
+          where: { email: nextRequest.email },
+          data: { accessStatus: AccessStatus.WAITLISTED },
+        });
+      }
+
+      return nextRequest;
     });
 
-    await sendTransactionalEmail({
-      to: accessRequest.email,
-      templateKey:
-        parsed.data.action === "resend_setup"
-          ? "access_approved_setup_resent"
-          : "access_approved_set_password",
-      ...email,
-    }).catch((error) => {
-      console.error("access_approved_set_password email failed", error);
+    if (status !== AccessStatus.APPROVED && previousUser) {
+      reviewedMember = await prisma.user.findUnique({
+        where: { email: accessRequest.email },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          accessStatus: true,
+          passwordSetAt: true,
+          suspendedAt: true,
+          createdAt: true,
+        },
+      });
+    }
+
+    if (status === AccessStatus.APPROVED && setupToken) {
+      const lifecycleReady = await hasEventLifecycleSchema(prisma);
+      const liveExperiences = lifecycleReady
+        ? await prisma.experience.findMany({
+            where: {
+              status: EventStatus.PUBLISHED,
+              visibilityType: EventVisibility.ALL_MEMBERS,
+              isVisible: true,
+              isArchived: false,
+              dateTime: { gte: new Date() },
+            },
+            orderBy: { dateTime: "asc" },
+            take: 3,
+            select: {
+              title: true,
+              dateTime: true,
+              location: true,
+            },
+          })
+        : await prisma.experience.findMany({
+            where: {
+              isVisible: true,
+              dateTime: { gte: new Date() },
+            },
+            orderBy: { dateTime: "asc" },
+            take: 3,
+            select: {
+              title: true,
+              dateTime: true,
+              location: true,
+            },
+          });
+      const email = accessApprovedSetPasswordEmail({
+        name: accessRequest.fullName,
+        setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
+        experiences: liveExperiences,
+      });
+
+      await sendTransactionalEmail({
+        to: accessRequest.email,
+        templateKey:
+          parsed.data.action === "resend_setup"
+            ? "access_approved_setup_resent"
+            : "access_approved_set_password",
+        ...email,
+      }).catch((error) => {
+        console.error("access_approved_set_password email failed", error);
+      });
+    }
+
+    if (status === AccessStatus.DECLINED) {
+      const email = accessDeclinedEmail(accessRequest.fullName);
+      await sendTransactionalEmail({
+        to: accessRequest.email,
+        templateKey: "access_declined",
+        ...email,
+      }).catch((error) => {
+        console.error("access_declined email failed", error);
+      });
+    }
+
+    if (status === AccessStatus.WAITLISTED) {
+      const email = accessWaitlistedEmail(accessRequest.fullName);
+      await sendTransactionalEmail({
+        to: accessRequest.email,
+        templateKey: "access_waitlisted",
+        ...email,
+      }).catch((error) => {
+        console.error("access_waitlisted email failed", error);
+      });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      status,
+      member: serializeMember(reviewedMember),
     });
+  } catch (error) {
+    console.error("access request review failed", error);
+
+    return NextResponse.json(
+      { error: "Could not update access request. Please try again." },
+      { status: 500 },
+    );
   }
-
-  if (status === AccessStatus.DECLINED) {
-    await prisma.user.updateMany({
-      where: { email: accessRequest.email },
-      data: { accessStatus: AccessStatus.DECLINED },
-    });
-
-    const email = accessDeclinedEmail(accessRequest.fullName);
-    await sendTransactionalEmail({
-      to: accessRequest.email,
-      templateKey: "access_declined",
-      ...email,
-    }).catch((error) => {
-      console.error("access_declined email failed", error);
-    });
-  }
-
-  if (status === AccessStatus.WAITLISTED) {
-    await prisma.user.updateMany({
-      where: { email: accessRequest.email },
-      data: { accessStatus: AccessStatus.WAITLISTED },
-    });
-
-    const email = accessWaitlistedEmail(accessRequest.fullName);
-    await sendTransactionalEmail({
-      to: accessRequest.email,
-      templateKey: "access_waitlisted",
-      ...email,
-    }).catch((error) => {
-      console.error("access_waitlisted email failed", error);
-    });
-  }
-
-  return NextResponse.json({ ok: true, status });
 }

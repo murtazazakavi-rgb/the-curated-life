@@ -101,7 +101,7 @@ img {
 }
 
 .wrap {
-  width: min(100% - 40px, 1180px);
+  width: min(100% - 24px, 1180px);
   margin: 0 auto;
 }
 
@@ -118,9 +118,9 @@ img {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  width: min(100% - 32px, 1180px);
-  min-height: 68px;
+  gap: 8px;
+  width: min(100% - 24px, 1180px);
+  min-height: 64px;
   margin: 0 auto;
 }
 
@@ -131,7 +131,7 @@ img {
 }
 
 .wordmark__logo {
-  width: clamp(142px, 22vw, 212px);
+  width: 118px;
   height: auto;
   mix-blend-mode: multiply;
 }
@@ -158,17 +158,19 @@ img {
 
 .header-action {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(15, 15, 15, 0.14);
   border-radius: 999px;
-  padding: 0 14px;
+  padding: 0 9px;
   background: rgba(255, 250, 242, 0.72);
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.1em;
+  line-height: 1.1;
+  text-align: center;
   text-transform: uppercase;
 }
 
@@ -198,7 +200,7 @@ img {
 .hero-public__content {
   position: relative;
   z-index: 1;
-  width: min(100% - 40px, 1180px);
+  width: min(100% - 24px, 1180px);
   margin: 0 auto;
   padding: 68px 0 64px;
 }
@@ -238,8 +240,8 @@ img {
 
 .display-title {
   max-width: 10ch;
-  margin-top: 22px;
-  font-size: 4rem;
+  margin-top: 16px;
+  font-size: 3.2rem;
   line-height: 0.95;
 }
 
@@ -253,34 +255,36 @@ img {
 
 .hero-copy {
   max-width: 42rem;
-  margin: 26px 0 0;
+  margin: 16px 0 0;
   color: rgba(245, 241, 234, 0.8);
   font-size: 1rem;
-  line-height: 1.8;
+  line-height: 1.55;
   font-weight: 300;
 }
 
 .cta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 30px;
+  gap: 8px;
+  margin-top: 22px;
 }
 
 .btn {
   position: relative;
   display: inline-flex;
-  min-height: 48px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 12px;
   border-radius: 999px;
-  padding: 0 22px;
+  padding: 0 16px;
   cursor: pointer;
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
+  line-height: 1.1;
+  text-align: center;
   text-transform: uppercase;
   transition: transform 220ms var(--ease), background 220ms ease, color 220ms ease, border-color 220ms ease;
 }
@@ -348,7 +352,7 @@ img {
   display: flex;
   width: max-content;
   gap: 32px;
-  padding: 13px 0;
+  padding: 9px 0;
   animation: marquee 38s linear infinite;
 }
 
@@ -358,7 +362,7 @@ img {
   gap: 20px;
   color: rgba(15, 15, 15, 0.66);
   font-family: var(--font-serif);
-  font-size: 18px;
+  font-size: 15px;
   font-style: italic;
   font-weight: 300;
   white-space: nowrap;
@@ -379,11 +383,11 @@ img {
 }
 
 .section {
-  padding: 72px 0;
+  padding: 44px 0;
 }
 
 .section--tight {
-  padding: 52px 0;
+  padding: 44px 0;
 }
 
 .section--dark {
@@ -403,7 +407,7 @@ img {
 
 .section-title {
   margin-top: 14px;
-  font-size: 2.5rem;
+  font-size: 2.18rem;
   line-height: 0.98;
 }
 
@@ -449,15 +453,13 @@ img {
 
 .experience-grid {
   display: grid;
-  grid-auto-columns: 78%;
-  grid-auto-flow: column;
-  gap: 14px;
-  margin: 0 -20px;
-  overflow-x: auto;
-  padding: 4px 20px 14px;
-  scroll-padding-left: 20px;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
+  grid-auto-columns: auto;
+  grid-auto-flow: row;
+  gap: 10px;
+  margin: 0;
+  overflow: visible;
+  padding: 0;
+  scroll-snap-type: none;
 }
 
 .experience-grid::-webkit-scrollbar {
@@ -465,17 +467,21 @@ img {
 }
 
 .experience-card {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  min-height: 132px;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: 14px;
   background: var(--cream);
   color: var(--ink);
   box-shadow: var(--shadow-deep);
-  scroll-snap-align: start;
 }
 
 .experience-card__image {
   position: relative;
-  aspect-ratio: 4 / 5;
+  height: 100%;
+  min-height: 132px;
+  aspect-ratio: auto;
   overflow: hidden;
   background: var(--cream-2);
 }
@@ -493,24 +499,25 @@ img {
 }
 
 .experience-card__date {
-  position: absolute;
-  top: 14px;
-  left: 14px;
+  position: static;
+  display: inline-flex;
+  align-items: center;
   border-radius: 999px;
-  background: rgba(245, 241, 234, 0.92);
-  padding: 7px 10px;
-  color: var(--ink);
+  background: rgba(231, 222, 208, 0.72);
+  padding: 5px 7px;
+  color: rgba(15, 15, 15, 0.72);
   font-family: var(--font-sans);
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.1em;
+  line-height: 1;
   text-transform: uppercase;
 }
 
 .experience-card__body {
   display: grid;
-  gap: 9px;
-  padding: 18px;
+  gap: 5px;
+  padding: 11px 12px;
 }
 
 .experience-card__meta,
@@ -541,20 +548,44 @@ img {
 }
 
 .experience-card__description {
-  min-height: 4.8em;
-  margin: 0;
-  color: rgba(15, 15, 15, 0.66);
-  font-size: 14px;
-  line-height: 1.6;
+  display: none;
 }
 
 .host-chip {
+  display: none;
   color: var(--bronze);
   font-family: var(--font-sans);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+}
+
+.experience-card h3 {
+  font-size: 1.13rem;
+}
+
+.experience-card__meta {
+  margin: 0;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.experience-card__host {
+  display: none;
+}
+
+.experience-card .btn {
+  width: auto;
+  min-height: 32px;
+  justify-self: start;
+  padding: 0 10px;
+  font-size: 8px;
+  letter-spacing: 0.11em;
+}
+
+.experience-card .arrow {
+  width: 11px;
 }
 
 .step-grid {
@@ -869,6 +900,12 @@ select[multiple].input option {
     width: min(100% - 56px, 1180px);
   }
 
+  .site-header__inner {
+    gap: 16px;
+    width: min(100% - 32px, 1180px);
+    min-height: 68px;
+  }
+
   .header-nav {
     display: flex;
   }
@@ -877,21 +914,59 @@ select[multiple].input option {
     font-size: 15px;
   }
 
+  .wordmark__logo {
+    width: 172px;
+  }
+
+  .header-action {
+    min-height: 38px;
+    padding: 0 14px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+  }
+
   .hero-public__content {
     width: min(100% - 56px, 1180px);
     padding: 92px 0 84px;
   }
 
   .display-title {
+    margin-top: 22px;
     font-size: 5.6rem;
   }
 
   .hero-copy {
+    margin-top: 26px;
     font-size: 1.08rem;
+    line-height: 1.8;
+  }
+
+  .marquee__track {
+    padding: 13px 0;
+  }
+
+  .marquee span {
+    font-size: 18px;
+  }
+
+  .cta-row {
+    gap: 10px;
+    margin-top: 30px;
+  }
+
+  .btn {
+    min-height: 48px;
+    padding: 0 22px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
   }
 
   .section {
     padding: 96px 0;
+  }
+
+  .section--tight {
+    padding: 52px 0;
   }
 
   .section-head {
@@ -920,10 +995,73 @@ select[multiple].input option {
   .experience-grid {
     grid-auto-flow: row;
     grid-auto-columns: auto;
+    gap: 14px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     margin: 0;
     overflow: visible;
     padding: 0;
+  }
+
+  .experience-card {
+    display: block;
+    min-height: 0;
+    border-radius: 18px;
+  }
+
+  .experience-card__image {
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 4 / 5;
+  }
+
+  .experience-card__date {
+    padding: 6px 9px;
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+
+  .experience-card__body {
+    gap: 9px;
+    padding: 18px;
+  }
+
+  .experience-card h3 {
+    font-size: 1.55rem;
+  }
+
+  .experience-card__meta {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+  }
+
+  .experience-card__description {
+    display: block;
+    min-height: 4.8em;
+    margin: 0;
+    color: rgba(15, 15, 15, 0.66);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .host-chip {
+    display: inline;
+  }
+
+  .experience-card__host {
+    display: block;
+  }
+
+  .experience-card .btn {
+    width: 100%;
+    min-height: 48px;
+    justify-self: stretch;
+    padding: 0 22px;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+  }
+
+  .experience-card .arrow {
+    width: 15px;
   }
 
   .form-grid {
@@ -946,6 +1084,10 @@ select[multiple].input option {
 }
 
 @media (min-width: 1040px) {
+  .wordmark__logo {
+    width: 212px;
+  }
+
   .experience-grid {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
@@ -956,26 +1098,8 @@ select[multiple].input option {
 }
 
 @media (max-width: 420px) {
-  .site-header__inner {
-    gap: 10px;
-    width: min(100% - 24px, 1180px);
-  }
-
   .wordmark {
     flex: 1 1 auto;
-  }
-
-  .header-action {
-    padding: 0 10px;
-    letter-spacing: 0.14em;
-  }
-
-  .display-title {
-    font-size: 3.3rem;
-  }
-
-  .section-title {
-    font-size: 2.18rem;
   }
 
   .btn {

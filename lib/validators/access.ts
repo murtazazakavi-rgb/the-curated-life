@@ -142,3 +142,9 @@ export const memberAdminSchema = z.object({
   role: z.enum(["MEMBER", "ADMIN"]),
   accessStatus: z.enum(["PENDING", "APPROVED", "DECLINED", "WAITLISTED"]),
 });
+
+export const directMemberCreateSchema = z.object({
+  fullName: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(180).transform((value) => value.toLowerCase()),
+  role: z.enum(["MEMBER", "ADMIN"]).default("MEMBER"),
+});

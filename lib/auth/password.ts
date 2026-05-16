@@ -2,6 +2,15 @@ import { randomBytes, createHash } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { getPrisma } from "@/lib/prisma/client";
 
+type PasswordSetupTokenStore = Pick<
+  ReturnType<typeof getPrisma>,
+  "passwordSetupToken"
+>;
+type PasswordResetTokenStore = Pick<
+  ReturnType<typeof getPrisma>,
+  "passwordResetToken"
+>;
+
 const PASSWORD_MIN_LENGTH = 8;
 const TOKEN_BYTES = 32;
 const SETUP_TOKEN_HOURS = 72;
@@ -34,52 +43,72 @@ export async function verifyPassword(password: string, passwordHash: string) {
   return bcrypt.compare(password, passwordHash);
 }
 
-export async function createPasswordSetupToken(userId: string) {
+export async function createPasswordSetupTokenWithClient(
+  prisma: PasswordSetupTokenStore,
+  userId: string,
+) {
   const token = randomToken();
   const tokenHash = hashOpaqueToken(token);
-  const prisma = getPrisma();
 
-  await prisma.$transaction([
-    prisma.passwordSetupToken.updateMany({
-      where: {
-        userId,
-        usedAt: null,
-      },
-      data: { usedAt: new Date() },
-    }),
-    prisma.passwordSetupToken.create({
-      data: {
-        tokenHash,
-        userId,
-        expiresAt: expiry(SETUP_TOKEN_HOURS),
-      },
-    }),
-  ]);
+  await prisma.passwordSetupToken.updateMany({
+    where: {
+      userId,
+      usedAt: null,
+    },
+    data: { usedAt: new Date() },
+  });
+
+  await prisma.passwordSetupToken.create({
+    data: {
+      tokenHash,
+      userId,
+      expiresAt: expiry(SETUP_TOKEN_HOURS),
+    },
+  });
+
+  return token;
+}
+
+export async function createPasswordSetupToken(userId: string) {
+  const prisma = getPrisma();
+  const token = await prisma.$transaction((tx) =>
+    createPasswordSetupTokenWithClient(tx, userId),
+  );
 
   return token;
 }
 
 export async function createPasswordResetToken(userId: string) {
+  const prisma = getPrisma();
+  const token = await prisma.$transaction((tx) =>
+    createPasswordResetTokenWithClient(tx, userId),
+  );
+
+  return token;
+}
+
+export async function createPasswordResetTokenWithClient(
+  prisma: PasswordResetTokenStore,
+  userId: string,
+) {
   const token = randomToken();
   const tokenHash = hashOpaqueToken(token);
-  const prisma = getPrisma();
 
-  await prisma.$transaction([
-    prisma.passwordResetToken.updateMany({
-      where: {
-        userId,
-        usedAt: null,
-      },
-      data: { usedAt: new Date() },
-    }),
-    prisma.passwordResetToken.create({
-      data: {
-        tokenHash,
-        userId,
-        expiresAt: expiry(RESET_TOKEN_HOURS),
-      },
-    }),
-  ]);
+  await prisma.passwordResetToken.updateMany({
+    where: {
+      userId,
+      usedAt: null,
+    },
+    data: { usedAt: new Date() },
+  });
+
+  await prisma.passwordResetToken.create({
+    data: {
+      tokenHash,
+      userId,
+      expiresAt: expiry(RESET_TOKEN_HOURS),
+    },
+  });
 
   return token;
 }

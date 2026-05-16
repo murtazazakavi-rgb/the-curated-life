@@ -115,6 +115,29 @@ export function accessApprovedSetPasswordEmail(input: {
   };
 }
 
+export function directMemberSetPasswordEmail(input: {
+  name: string;
+  setupUrl: string;
+}): EmailTemplate {
+  const title = "You have been chosen for The Curated Life.";
+  const body = `Dear ${escapeHtml(input.name)}, you have been personally chosen and added to The Curated Life circle. Please set your password using the private link below, then sign in with this email address.`;
+
+  return {
+    subject: "You have been added to The Curated Life",
+    html: baseEmail({
+      title,
+      eyebrow: "Circle Access",
+      body: paragraph(
+        `Dear ${input.name}, you have been personally chosen and added to The Curated Life circle. Please set your password using the private link below, then sign in with this email address.`,
+      ),
+      ctaLabel: "Set Password",
+      ctaUrl: input.setupUrl,
+      note: "For your security, this link expires and can only be used once.",
+    }),
+    text: asText(title, body, input.setupUrl),
+  };
+}
+
 export function accessWaitlistedEmail(name: string): EmailTemplate {
   const title = "Your request is being held with care.";
   const body = `Dear ${escapeHtml(name)}, thank you for your request. We are keeping the first gatherings very intimate, so we have placed your name on the waitlist and will write when a considered opening becomes available.`;

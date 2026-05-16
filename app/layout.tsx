@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cormorant_Garamond, Inter } from "next/font/google";
 import "./globals.css";
 import "./ux-overrides.css";
@@ -19,6 +19,11 @@ export const metadata: Metadata = {
   title: "The Curated Life",
   description:
     "A private, reference-only circle for curated lifestyle experiences.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

@@ -500,6 +500,7 @@ export function AdminConsole({
   const [memberSearch, setMemberSearch] = useState("");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [requestNote, setRequestNote] = useState("");
+  const [isAddingMember, setIsAddingMember] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [deleteMemberTargetId, setDeleteMemberTargetId] = useState<string | null>(null);
   const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
@@ -649,7 +650,7 @@ export function AdminConsole({
 
   async function reviewRequest(id: string, action: AccessAction) {
     const key = `request:${id}:${action}`;
-    const payload = await runJson<{ status: string }>(
+    const payload = await runJson<{ status: string; member?: MemberView | null }>(
       key,
       `/api/admin/access-requests/${id}`,
       {
@@ -677,6 +678,22 @@ export function AdminConsole({
           : request,
       ),
     );
+
+    const reviewedMember = payload.member;
+    if (reviewedMember) {
+      setMemberState((current) => {
+        const exists = current.some((member) => member.id === reviewedMember.id);
+
+        if (exists) {
+          return current.map((member) =>
+            member.id === reviewedMember.id ? reviewedMember : member,
+          );
+        }
+
+        return [reviewedMember, ...current];
+      });
+    }
+
     showToast(
       "success",
       action === "resend_setup"
@@ -723,6 +740,44 @@ export function AdminConsole({
     );
     setEditingMemberId(null);
     showToast("success", "Member details saved.");
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const payload = {
+      fullName: fieldValue(formData, "fullName"),
+      email: fieldValue(formData, "email"),
+      role: fieldValue(formData, "role"),
+    };
+    const body = await runJson<{ member: MemberView }>(
+      "member:add",
+      "/api/admin/members",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      "Could not add member.",
+    );
+
+    if (!body) return;
+
+    setMemberState((current) => {
+      const exists = current.some((member) => member.id === body.member.id);
+
+      if (exists) {
+        return current.map((member) =>
+          member.id === body.member.id ? body.member : member,
+        );
+      }
+
+      return [body.member, ...current];
+    });
+    form.reset();
+    setIsAddingMember(false);
+    showToast("success", "Member added and setup email sent.");
   }
 
   async function deleteMember(id: string) {
@@ -1103,7 +1158,16 @@ export function AdminConsole({
                     Access holders
                   </h2>
                 </div>
-                <span className="status-pill">{filteredMembers.length}</span>
+                <div className="admin-actions">
+                  <button
+                    type="button"
+                    className="small-button bronze"
+                    onClick={() => setIsAddingMember(true)}
+                  >
+                    Add Member
+                  </button>
+                  <span className="status-pill">{filteredMembers.length}</span>
+                </div>
               </div>
               <label className="field compact-field">
                 <span>Search members</span>
@@ -1611,6 +1675,54 @@ export function AdminConsole({
                 disabled={isLoading(`feedback:${selectedFeedback.id}:update`)}
               >
                 {isLoading(`feedback:${selectedFeedback.id}:update`) ? "Saving" : "Save Reply"}
+              </button>
+            </form>
+          </aside>
+        </div>
+      ) : null}
+
+      {isAddingMember ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Add member">
+          <aside className="admin-drawer">
+            <div className="drawer-head">
+              <div>
+                <p className="eyebrow">Add Member</p>
+                <h2 className="panel-title">Approve directly</h2>
+              </div>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setIsAddingMember(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="drawer-section">
+              <p className="section-copy">
+                This creates approved access and sends a private setup link by email.
+              </p>
+            </div>
+            <form className="field-grid drawer-form" onSubmit={addMember}>
+              <label className="field full-field">
+                <span>Full name</span>
+                <input name="fullName" className="input" required />
+              </label>
+              <label className="field full-field">
+                <span>Email</span>
+                <input name="email" type="email" className="input" required />
+              </label>
+              <label className="field">
+                <span>Role</span>
+                <select name="role" className="input" defaultValue="MEMBER">
+                  <option value="MEMBER">Member</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </label>
+              <button
+                className="small-button bronze full-field"
+                disabled={isLoading("member:add")}
+              >
+                {isLoading("member:add") ? "Adding" : "Add and send setup email"}
               </button>
             </form>
           </aside>
