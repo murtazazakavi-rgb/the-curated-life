@@ -69,6 +69,15 @@ type FeedbackThreadView = {
   }>;
 };
 
+type MemberTab = "invitations" | "bookings" | "refer" | "feedback";
+
+const memberTabs: Array<{ id: MemberTab; label: string }> = [
+  { id: "invitations", label: "Invitations" },
+  { id: "bookings", label: "Bookings" },
+  { id: "refer", label: "Refer" },
+  { id: "feedback", label: "Help" },
+];
+
 export function MemberDashboard({
   member,
   experiences,
@@ -82,6 +91,7 @@ export function MemberDashboard({
   const [message, setMessage] = useState("");
   const [referralMessage, setReferralMessage] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [activeTab, setActiveTab] = useState<MemberTab>("invitations");
   const [cancellationTarget, setCancellationTarget] =
     useState<ReservationView | null>(null);
   const [now] = useState(() => Date.now());
@@ -104,6 +114,14 @@ export function MemberDashboard({
       ["CANCELLED"].includes(reservation.status) ||
       ["POSTPONED", "CANCELLED"].includes(reservation.eventStatus),
   );
+  const confirmedCount = reservationState.filter(
+    (reservation) => reservation.status === "CONFIRMED",
+  ).length;
+  const pendingCount = reservationState.filter((reservation) =>
+    ["REQUESTED", "WAITLISTED", "CANCELLATION_REQUESTED"].includes(
+      reservation.status,
+    ),
+  ).length;
 
   async function reserve(experienceId: string) {
     setMessage("");
@@ -246,368 +264,389 @@ export function MemberDashboard({
 
   return (
     <>
-      <section className="member-hero">
-        <div className="wrap member-layout">
-          <div className="dark-panel member-hero__welcome">
-            <div className="dark-panel__inner">
-              <p className="eyebrow on-dark">Welcome to the circle</p>
-              <h1 className="display-title member-title">
-                Your access <em>has been granted.</em>
-              </h1>
-              <p className="hero-copy">
-                You can now view private invitations, reserve your place for selected
-                experiences, and refer thoughtful people by email.
-              </p>
-              <div className="cta-row">
-                <a className="btn btn--cream" href="#invitations">
-                  View Invitations <span className="arrow" />
-                </a>
-                <a className="btn btn--ghost-light" href="#refer">
-                  Refer Someone <span className="arrow" />
-                </a>
-                <a className="btn btn--ghost-light" href="#history">
-                  My History <span className="arrow" />
-                </a>
-              </div>
-            </div>
-          </div>
-
-          <aside className="member-card" aria-label="Member card">
-            <div className="member-card__inner">
-              <p className="eyebrow on-dark">Member card</p>
-              <div>
-                <p className="member-card__name">{member.fullName}</p>
-                <p className="member-card__meta">{member.email}</p>
-              </div>
-              <p className="member-card__meta">
-                Access holder · Email verified · Private invitations
-              </p>
-              <div className="member-card__actions">
-                <Link className="btn btn--ghost-light btn--full" href="/">
-                  Back to Home
-                </Link>
-                <button className="btn btn--cream btn--full" type="button" onClick={signOut}>
-                  Logout
-                </button>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </section>
-
-      <section id="invitations" className="dashboard-section">
-        <div className="wrap">
-          <div className="section-head">
+      <section className="member-dashboard">
+        <div className="wrap member-dashboard__shell">
+          <header className="member-dashboard__header">
             <div>
-              <p className="eyebrow">Private invitations</p>
-              <h2 className="section-title">
-                Available <em>to you.</em>
-              </h2>
+              <p className="eyebrow">Member dashboard</p>
+              <h1 className="member-dashboard__title">{member.fullName}</h1>
+              <p className="member-dashboard__meta">{member.email}</p>
             </div>
-            <p className="section-copy">
-              Reservation requests are reviewed personally before confirmation.
-            </p>
-          </div>
-
-          <div className="stack">
-            {experiences.map((experience) => {
-              const reservation = reservationsByExperience.get(experience.id);
-              const reservationStatus = reservation?.status;
-              const canSeeAttendees =
-                reservationStatus === "CONFIRMED" &&
-                experience.attendeeVisibilityEnabled;
-
-              return (
-                <article className="invite-card" key={experience.id}>
-                  <div className="invite-card__top">
-                    <div>
-                      <p className="eyebrow">{experience.hostedByLabel}</p>
-                      <h3>{experience.title}</h3>
-                    </div>
-                    <span className="status-pill">
-                      {reservationStatus === "CONFIRMED"
-                        ? "You're Attending"
-                        : reservationStatus === "CANCELLATION_REQUESTED"
-                          ? "Cancellation requested"
-                          : reservationStatus
-                            ? reservationStatus.replace(/_/g, " ")
-                            : "Private Invitation"}
-                    </span>
-                  </div>
-                  <div className="meta">
-                    <p>{formatExperienceDate(experience.dateTime)}</p>
-                    <p>{experience.location}</p>
-                    <p>{experience.hostName}{experience.hostTitle ? ` · ${experience.hostTitle}` : ""}</p>
-                  </div>
-                  <p className="section-copy">{experience.description}</p>
-                  <button
-                    className="btn btn--ink"
-                    type="button"
-                    onClick={() => reserve(experience.id)}
-                    disabled={Boolean(reservationStatus)}
-                  >
-                    {reservationStatus === "CONFIRMED"
-                      ? "You're Attending"
-                      : reservationStatus
-                        ? "Request Received"
-                        : "Reserve My Spot"}
-                    <span className="arrow" />
-                  </button>
-                  {reservation &&
-                  !["CANCELLED", "CANCELLATION_REQUESTED"].includes(
-                    reservation.status,
-                  ) ? (
-                    <button
-                      className="small-button secondary"
-                      type="button"
-                      onClick={() => setCancellationTarget(reservation)}
-                    >
-                      Request Cancellation
-                    </button>
-                  ) : null}
-                  {canSeeAttendees ? (
-                    <div className="attendee-section">
-                      <p className="eyebrow">Who&apos;s attending</p>
-                      <div className="attendee-list">
-                        {experience.attendees.map((attendee) => (
-                          <span className="attendee-chip" key={attendee.id}>
-                            <span className="attendee-avatar">
-                              {attendee.firstName.slice(0, 1)}
-                            </span>
-                            {attendee.firstName}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
-          <p className="form-status" role="status">
-            {message}
-          </p>
-        </div>
-      </section>
-
-      <section id="history" className="dashboard-section">
-        <div className="wrap">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">My History</p>
-              <h2 className="section-title">
-                Your circle <em>over time.</em>
-              </h2>
-            </div>
-            <p className="section-copy">
-              Upcoming registrations, attended experiences, updates, and future
-              payment or purchase references will live here.
-            </p>
-          </div>
-          <div className="history-grid">
-            <div className="history-column">
-              <p className="eyebrow">Upcoming registrations</p>
-              {upcomingHistory.length ? (
-                upcomingHistory.map((reservation) => (
-                  <article className="history-card" key={reservation.id}>
-                    <span className="status-pill">
-                      {reservation.status === "CANCELLATION_REQUESTED"
-                        ? "Cancellation pending"
-                        : reservation.status.replace(/_/g, " ")}
-                    </span>
-                    <h3>{reservation.experienceTitle}</h3>
-                    <p className="meta">
-                      {formatExperienceDate(reservation.experienceDateTime)}
-                    </p>
-                    <p className="section-copy">{reservation.experienceLocation}</p>
-                  </article>
-                ))
-              ) : (
-                <p className="section-copy">No upcoming registrations yet.</p>
-              )}
-            </div>
-            <div className="history-column">
-              <p className="eyebrow">Past and updates</p>
-              {pastHistory.length ? (
-                pastHistory.map((reservation) => (
-                  <article className="history-card" key={reservation.id}>
-                    <span className="status-pill">
-                      {reservation.eventStatus === "POSTPONED"
-                        ? "Postponed"
-                        : reservation.eventStatus === "CANCELLED" ||
-                            reservation.status === "CANCELLED"
-                          ? "Cancelled"
-                          : "Attended"}
-                    </span>
-                    <h3>{reservation.experienceTitle}</h3>
-                    <p className="meta">
-                      {formatExperienceDate(reservation.experienceDateTime)}
-                    </p>
-                  </article>
-                ))
-              ) : (
-                <p className="section-copy">Your attended experiences will appear here.</p>
-              )}
-            </div>
-            <div className="history-column">
-              <p className="eyebrow">Future records</p>
-              <article className="history-card muted-history-card">
-                <h3>Payments</h3>
-                <p className="section-copy">Payment references will appear here later.</p>
-              </article>
-              <article className="history-card muted-history-card">
-                <h3>Products</h3>
-                <p className="section-copy">Product purchases will appear here later.</p>
-              </article>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="refer" className="section section--dark">
-        <div className="wrap form-grid">
-          <div>
-            <p className="eyebrow on-dark">Referral by email</p>
-            <h2 className="section-title">
-              Invite someone <em>thoughtful.</em>
-            </h2>
-            <p className="hero-copy">
-              Referrals are not public invites or viral links. Send a warm note to
-              someone you believe would feel naturally aligned with this circle.
-            </p>
-          </div>
-          <form className="form-panel" onSubmit={submitReferral}>
-            <div className="field-grid">
-              <div className="field">
-                <label htmlFor="referred_name">Name</label>
-                <input id="referred_name" name="referred_name" className="input" required />
-              </div>
-              <div className="field">
-                <label htmlFor="referred_email">Email</label>
-                <input
-                  id="referred_email"
-                  name="referred_email"
-                  type="email"
-                  className="input"
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="relationship">Relationship</label>
-                <input id="relationship" name="relationship" className="input" required />
-              </div>
-              <div className="field">
-                <label htmlFor="optional_note">Optional note</label>
-                <textarea id="optional_note" name="optional_note" className="textarea" />
-              </div>
-              <button className="btn btn--ink btn--full">
-                Send Invitation Email <span className="arrow" />
+            <div className="member-dashboard__actions">
+              <Link className="small-button secondary" href="/">
+                Home
+              </Link>
+              <button className="small-button secondary" type="button" onClick={signOut}>
+                Logout
               </button>
-              <p className="form-status" role="status">
-                {referralMessage}
-              </p>
             </div>
-          </form>
-        </div>
-      </section>
+          </header>
 
-      <section className="dashboard-section">
-        <div className="wrap">
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">Your referrals</p>
-              <h2 className="section-title">
-                Quiet <em>introductions.</em>
-              </h2>
-            </div>
+          <div className="member-stat-grid" aria-label="Member summary">
+            <article className="member-stat">
+              <span>Open invitations</span>
+              <strong>{experiences.length}</strong>
+            </article>
+            <article className="member-stat">
+              <span>Confirmed</span>
+              <strong>{confirmedCount}</strong>
+            </article>
+            <article className="member-stat">
+              <span>Pending</span>
+              <strong>{pendingCount}</strong>
+            </article>
+            <article className="member-stat">
+              <span>Referrals</span>
+              <strong>{referralState.length}</strong>
+            </article>
           </div>
-          <div className="stack">
-            {referralState.length ? (
-              referralState.map((referral) => (
-                <article className="invite-card" key={referral.id}>
-                  <div className="invite-card__top">
-                    <div>
-                      <h3>{referral.referredName}</h3>
-                      <p className="section-copy">{referral.referredEmail}</p>
-                    </div>
-                    <span className="status-pill">{referral.status}</span>
-                  </div>
-                  <p className="microcopy">{referral.relationship}</p>
-                </article>
-              ))
-            ) : (
-              <p className="section-copy">No referrals sent yet.</p>
-            )}
-          </div>
-        </div>
-      </section>
 
-      <section className="dashboard-section" id="feedback">
-        <div className="wrap form-grid">
-          <div>
-            <p className="eyebrow">Member notes</p>
-            <h2 className="section-title">
-              Feedback, kept <em>personal.</em>
-            </h2>
-            <p className="section-copy">
-              Send experience feedback, product thoughts, technical issues,
-              suggestions, or a general message to the team.
-            </p>
-          </div>
-          <form className="form-panel" onSubmit={submitFeedback}>
-            <div className="field-grid">
-              <label className="field">
-                <span>Category</span>
-                <select name="category" className="input" defaultValue="GENERAL_MESSAGE">
-                  <option value="EXPERIENCE_FEEDBACK">Experience Feedback</option>
-                  <option value="PRODUCT_FEEDBACK">Product Feedback</option>
-                  <option value="TECHNICAL_ISSUE">Technical Issue</option>
-                  <option value="SUGGESTION">Suggestion</option>
-                  <option value="GENERAL_MESSAGE">General Message</option>
-                </select>
-              </label>
-              <label className="field">
-                <span>Subject</span>
-                <input name="subject" className="input" required />
-              </label>
-              <label className="field">
-                <span>Message</span>
-                <textarea name="message" className="textarea" required />
-              </label>
-              <button className="btn btn--ink btn--full">
-                Send Note <span className="arrow" />
+          <nav className="member-tabs" aria-label="Member sections">
+            {memberTabs.map((tab) => (
+              <button
+                className={`member-tab ${activeTab === tab.id ? "is-active" : ""}`}
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                aria-current={activeTab === tab.id ? "page" : undefined}
+              >
+                {tab.label}
               </button>
-              <p className="form-status" role="status">
-                {feedbackMessage}
-              </p>
-            </div>
-          </form>
-        </div>
-        <div className="wrap feedback-thread-list">
-          {feedbackState.length ? (
-            feedbackState.map((thread) => (
-              <article className="invite-card" key={thread.id}>
-                <div className="invite-card__top">
+            ))}
+          </nav>
+
+          <div className="member-panel">
+            {activeTab === "invitations" ? (
+              <section aria-labelledby="member-invitations-title">
+                <div className="member-panel__head">
                   <div>
-                    <p className="eyebrow">{thread.category.replace(/_/g, " ")}</p>
-                    <h3>{thread.subject}</h3>
+                    <p className="eyebrow">Private invitations</p>
+                    <h2 id="member-invitations-title" className="panel-title">
+                      Available to you
+                    </h2>
                   </div>
-                  <span className="status-pill">{thread.status.replace(/_/g, " ")}</span>
-                </div>
-                {thread.messages.map((item) => (
-                  <p className="section-copy" key={item.id}>
-                    {item.isAdmin ? "The Curated Life: " : "You: "}
-                    {item.message}
+                  <p className="section-copy">
+                    Reserve in one tap. Details stay tucked away until needed.
                   </p>
-                ))}
-              </article>
-            ))
-          ) : null}
+                </div>
+
+                <div className="member-invitation-list">
+                  {experiences.length ? (
+                    experiences.map((experience) => {
+                      const reservation = reservationsByExperience.get(experience.id);
+                      const reservationStatus = reservation?.status;
+                      const canSeeAttendees =
+                        reservationStatus === "CONFIRMED" &&
+                        experience.attendeeVisibilityEnabled;
+
+                      return (
+                        <article className="member-invite-card" key={experience.id}>
+                          <div className="member-invite-card__main">
+                            <div>
+                              <p className="microcopy">{experience.hostedByLabel}</p>
+                              <h3>{experience.title}</h3>
+                              <div className="member-inline-meta">
+                                <span>{formatExperienceDate(experience.dateTime)}</span>
+                                <span>{experience.location}</span>
+                              </div>
+                            </div>
+                            <span className="status-pill">
+                              {reservationStatus === "CONFIRMED"
+                                ? "Attending"
+                                : reservationStatus === "CANCELLATION_REQUESTED"
+                                  ? "Cancellation requested"
+                                  : reservationStatus
+                                    ? reservationStatus.replace(/_/g, " ")
+                                    : "Available"}
+                            </span>
+                          </div>
+
+                          <div className="member-card-actions">
+                            <button
+                              className="btn btn--ink"
+                              type="button"
+                              onClick={() => reserve(experience.id)}
+                              disabled={Boolean(reservationStatus)}
+                            >
+                              {reservationStatus === "CONFIRMED"
+                                ? "You're Attending"
+                                : reservationStatus
+                                  ? "Request Received"
+                                  : "Reserve"}
+                              <span className="arrow" />
+                            </button>
+                            {reservation &&
+                            !["CANCELLED", "CANCELLATION_REQUESTED"].includes(
+                              reservation.status,
+                            ) ? (
+                              <button
+                                className="small-button secondary"
+                                type="button"
+                                onClick={() => setCancellationTarget(reservation)}
+                              >
+                                Cancel
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <details className="member-details">
+                            <summary>Details</summary>
+                            <p className="section-copy">{experience.description}</p>
+                            <p className="meta">
+                              {experience.hostName}
+                              {experience.hostTitle ? ` · ${experience.hostTitle}` : ""}
+                            </p>
+                            {canSeeAttendees ? (
+                              <div className="attendee-section">
+                                <p className="eyebrow">Who&apos;s attending</p>
+                                <div className="attendee-list">
+                                  {experience.attendees.map((attendee) => (
+                                    <span className="attendee-chip" key={attendee.id}>
+                                      <span className="attendee-avatar">
+                                        {attendee.firstName.slice(0, 1)}
+                                      </span>
+                                      {attendee.firstName}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </details>
+                        </article>
+                      );
+                    })
+                  ) : (
+                    <p className="section-copy">
+                      New private invitations will appear here as they are released.
+                    </p>
+                  )}
+                </div>
+                <p className="form-status" role="status">
+                  {message}
+                </p>
+              </section>
+            ) : null}
+
+            {activeTab === "bookings" ? (
+              <section aria-labelledby="member-bookings-title">
+                <div className="member-panel__head">
+                  <div>
+                    <p className="eyebrow">Bookings</p>
+                    <h2 id="member-bookings-title" className="panel-title">
+                      Your reservations
+                    </h2>
+                  </div>
+                </div>
+                <div className="member-history-grid">
+                  <div className="history-column">
+                    <p className="eyebrow">Upcoming</p>
+                    {upcomingHistory.length ? (
+                      upcomingHistory.map((reservation) => (
+                        <article className="history-card" key={reservation.id}>
+                          <span className="status-pill">
+                            {reservation.status === "CANCELLATION_REQUESTED"
+                              ? "Cancellation pending"
+                              : reservation.status.replace(/_/g, " ")}
+                          </span>
+                          <h3>{reservation.experienceTitle}</h3>
+                          <p className="meta">
+                            {formatExperienceDate(reservation.experienceDateTime)}
+                          </p>
+                          <p className="section-copy">
+                            {reservation.experienceLocation}
+                          </p>
+                        </article>
+                      ))
+                    ) : (
+                      <p className="section-copy">No upcoming registrations yet.</p>
+                    )}
+                  </div>
+                  <div className="history-column">
+                    <p className="eyebrow">Past and updates</p>
+                    {pastHistory.length ? (
+                      pastHistory.map((reservation) => (
+                        <article className="history-card" key={reservation.id}>
+                          <span className="status-pill">
+                            {reservation.eventStatus === "POSTPONED"
+                              ? "Postponed"
+                              : reservation.eventStatus === "CANCELLED" ||
+                                  reservation.status === "CANCELLED"
+                                ? "Cancelled"
+                                : "Attended"}
+                          </span>
+                          <h3>{reservation.experienceTitle}</h3>
+                          <p className="meta">
+                            {formatExperienceDate(reservation.experienceDateTime)}
+                          </p>
+                        </article>
+                      ))
+                    ) : (
+                      <p className="section-copy">
+                        Your attended experiences will appear here.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {activeTab === "refer" ? (
+              <section aria-labelledby="member-refer-title">
+                <div className="member-task-grid">
+                  <div>
+                    <p className="eyebrow">Referral by email</p>
+                    <h2 id="member-refer-title" className="panel-title">
+                      Invite someone thoughtful
+                    </h2>
+                    <p className="section-copy">
+                      Send a warm note to someone you believe would feel naturally
+                      aligned with this circle.
+                    </p>
+                  </div>
+                  <form className="form-panel compact-task-form" onSubmit={submitReferral}>
+                    <div className="field-grid">
+                      <div className="field">
+                        <label htmlFor="referred_name">Name</label>
+                        <input
+                          id="referred_name"
+                          name="referred_name"
+                          className="input"
+                          required
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="referred_email">Email</label>
+                        <input
+                          id="referred_email"
+                          name="referred_email"
+                          type="email"
+                          className="input"
+                          required
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="relationship">Relationship</label>
+                        <input
+                          id="relationship"
+                          name="relationship"
+                          className="input"
+                          required
+                        />
+                      </div>
+                      <div className="field">
+                        <label htmlFor="optional_note">Optional note</label>
+                        <textarea id="optional_note" name="optional_note" className="textarea" />
+                      </div>
+                      <button className="btn btn--ink btn--full">
+                        Send Invitation Email <span className="arrow" />
+                      </button>
+                      <p className="form-status" role="status">
+                        {referralMessage}
+                      </p>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="member-compact-list">
+                  <p className="eyebrow">Sent referrals</p>
+                  {referralState.length ? (
+                    referralState.map((referral) => (
+                      <article className="member-list-card" key={referral.id}>
+                        <div>
+                          <h3>{referral.referredName}</h3>
+                          <p className="section-copy">{referral.referredEmail}</p>
+                        </div>
+                        <span className="status-pill">{referral.status}</span>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="section-copy">No referrals sent yet.</p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {activeTab === "feedback" ? (
+              <section aria-labelledby="member-feedback-title">
+                <div className="member-task-grid">
+                  <div>
+                    <p className="eyebrow">Member notes</p>
+                    <h2 id="member-feedback-title" className="panel-title">
+                      Feedback and help
+                    </h2>
+                    <p className="section-copy">
+                      Send experience feedback, product thoughts, technical issues,
+                      suggestions, or a general message to the team.
+                    </p>
+                  </div>
+                  <form className="form-panel compact-task-form" onSubmit={submitFeedback}>
+                    <div className="field-grid">
+                      <label className="field">
+                        <span>Category</span>
+                        <select
+                          name="category"
+                          className="input"
+                          defaultValue="GENERAL_MESSAGE"
+                        >
+                          <option value="EXPERIENCE_FEEDBACK">Experience Feedback</option>
+                          <option value="PRODUCT_FEEDBACK">Product Feedback</option>
+                          <option value="TECHNICAL_ISSUE">Technical Issue</option>
+                          <option value="SUGGESTION">Suggestion</option>
+                          <option value="GENERAL_MESSAGE">General Message</option>
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Subject</span>
+                        <input name="subject" className="input" required />
+                      </label>
+                      <label className="field">
+                        <span>Message</span>
+                        <textarea name="message" className="textarea" required />
+                      </label>
+                      <button className="btn btn--ink btn--full">
+                        Send Note <span className="arrow" />
+                      </button>
+                      <p className="form-status" role="status">
+                        {feedbackMessage}
+                      </p>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="member-compact-list">
+                  <p className="eyebrow">Recent notes</p>
+                  {feedbackState.length ? (
+                    feedbackState.map((thread) => (
+                      <article className="member-list-card" key={thread.id}>
+                        <div>
+                          <h3>{thread.subject}</h3>
+                          {thread.messages.slice(0, 1).map((item) => (
+                            <p className="section-copy" key={item.id}>
+                              {item.isAdmin ? "The Curated Life: " : "You: "}
+                              {item.message}
+                            </p>
+                          ))}
+                        </div>
+                        <span className="status-pill">{thread.status.replace(/_/g, " ")}</span>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="section-copy">No notes yet.</p>
+                  )}
+                </div>
+              </section>
+            ) : null}
+          </div>
         </div>
       </section>
 
       {cancellationTarget ? (
-        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Request cancellation">
+        <div
+          className="drawer-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Request cancellation"
+        >
           <aside className="confirm-modal">
             <p className="eyebrow">Request Cancellation</p>
             <h2 className="panel-title">{cancellationTarget.experienceTitle}</h2>
