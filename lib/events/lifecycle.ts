@@ -16,12 +16,28 @@ export function lifecycleFlags(status: EventStatus) {
 export async function hasEventLifecycleSchema(prisma: PrismaClient) {
   try {
     const [result] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
-      SELECT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_name = 'Experience'
-          AND column_name = 'status'
-      ) AS ready
+      SELECT
+        (
+          SELECT COUNT(*)
+          FROM information_schema.columns
+          WHERE table_name = 'Experience'
+            AND column_name IN (
+              'status',
+              'publishedAt',
+              'announcementSentAt',
+              'postponedAt',
+              'cancelledAt',
+              'cancellationReason',
+              'postponementMessage',
+              'visibilityType',
+              'attendeeVisibilityEnabled'
+            )
+        ) = 9
+        AND EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_name = 'ExperienceAudienceMember'
+        ) AS ready
     `;
 
     return Boolean(result?.ready);

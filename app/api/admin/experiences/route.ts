@@ -12,6 +12,22 @@ import { experienceAdminSchema } from "@/lib/validators/access";
 
 export const runtime = "nodejs";
 
+function eventMutationError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return "Could not create event. Please check the event details.";
+  }
+
+  if (/unique|slug/i.test(error.message)) {
+    return "An event with this slug already exists. Change the slug and try again.";
+  }
+
+  if (/column|relation|table|does not exist|Unknown arg|Invalid `prisma/i.test(error.message)) {
+    return "The event form needs the latest database migration. I saved a compatibility patch, but production still needs `npm run prisma:migrate` for all event fields.";
+  }
+
+  return error.message || "Could not create event. Please check the event details.";
+}
+
 export async function POST(request: Request) {
   const admin = await getAuthorizedAdmin();
 
@@ -37,34 +53,51 @@ export async function POST(request: Request) {
   const prisma = getPrisma();
   const lifecycleReady = await hasEventLifecycleSchema(prisma);
   const statusFlags = lifecycleFlags(eventStatus);
-  const experience = await prisma.experience.create({
-    data: {
-      ...data,
-      ...statusFlags,
-      ...(lifecycleReady
-        ? {
-            status: eventStatus,
-            visibilityType,
-            attendeeVisibilityEnabled,
-          }
-        : {}),
-      hostTitle: data.hostTitle || null,
-      hostBio: data.hostBio || null,
-      seatsTotal: data.seatsTotal ?? null,
-      dateTime: parseIndiaDateTimeLocal(data.dateTime),
-    },
-    include: lifecycleReady
-      ? {
-          reservations: { select: { id: true, status: true } },
-          audienceMembers: { select: { userId: true } },
-        }
-      : {
-          reservations: { select: { id: true, status: true } },
-        },
-  });
+  let experience;
 
-  if (lifecycleReady) {
-    await replaceAudienceMembers(prisma, experience.id, selectedMemberIds);
+  try {
+    experience = await prisma.experience.create({
+      data: {
+        title: data.title,
+        slug: data.slug,
+        description: data.description,
+        location: data.location,
+        dateTime: parseIndiaDateTimeLocal(data.dateTime),
+        imageUrl: data.imageUrl,
+        hostedByLabel: data.hostedByLabel,
+        hostName: data.hostName,
+        hostTitle: data.hostTitle || null,
+        hostBio: data.hostBio || null,
+        seatsTotal: data.seatsTotal ?? null,
+        isInviteOnly: data.isInviteOnly,
+        ...statusFlags,
+        ...(lifecycleReady
+          ? {
+              status: eventStatus,
+              visibilityType,
+              attendeeVisibilityEnabled,
+            }
+          : {}),
+      },
+      include: lifecycleReady
+        ? {
+            reservations: { select: { id: true, status: true } },
+            audienceMembers: { select: { userId: true } },
+          }
+        : {
+            reservations: { select: { id: true, status: true } },
+          },
+    });
+
+    if (lifecycleReady) {
+      await replaceAudienceMembers(prisma, experience.id, selectedMemberIds);
+    }
+  } catch (error) {
+    console.error("event create failed", error);
+    return NextResponse.json(
+      { error: eventMutationError(error) },
+      { status: 500 },
+    );
   }
 
   const experienceView = experience as typeof experience & {
