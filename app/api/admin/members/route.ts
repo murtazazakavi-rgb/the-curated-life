@@ -8,7 +8,6 @@ import {
   sendTransactionalEmail,
   type EmailDeliveryResult,
 } from "@/lib/email/send";
-import { getTableColumns, hasPasswordSetupSchema } from "@/lib/events/lifecycle";
 import { AccessStatus, UserRole } from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
 import { directMemberCreateSchema } from "@/lib/validators/access";
@@ -56,32 +55,36 @@ function failedSetupEmailDelivery(message?: string): SetupEmailDelivery {
   };
 }
 
+function routeError(message: string, error: unknown) {
+  const detail = error instanceof Error ? error.message : "";
+
+  return NextResponse.json(
+    {
+      error: detail ? `${message}: ${detail}` : message,
+    },
+    { status: 500 },
+  );
+}
+
 export async function POST(request: Request) {
-  const admin = await getAuthorizedAdmin();
-
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
-  }
-
-  const body = await request.json().catch(() => null);
-  const parsed = directMemberCreateSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Please review the member details." },
-      { status: 400 },
-    );
-  }
-
-  const prisma = getPrisma();
-
   try {
-    if (!(await hasPasswordSetupSchema(prisma))) {
+    const admin = await getAuthorizedAdmin();
+
+    if (!admin) {
+      return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+    }
+
+    const body = await request.json().catch(() => null);
+    const parsed = directMemberCreateSchema.safeParse(body);
+
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Adding members needs the password setup database migration." },
-        { status: 503 },
+        { error: "Please review the member details." },
+        { status: 400 },
       );
     }
+
+    const prisma = getPrisma();
 
     const existingUser = await prisma.user.findUnique({
       where: { email: parsed.data.email },
@@ -101,25 +104,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const accessRequestColumns = await getTableColumns(prisma, "AccessRequest");
     const accessRequestData: {
       status: AccessStatus;
-      reviewedAt?: Date;
-      reviewedById?: string;
-      adminNote?: string;
+      reviewedAt: Date;
+      reviewedById: string;
+      adminNote: string;
     } = {
       status: AccessStatus.APPROVED,
+      reviewedAt: new Date(),
+      reviewedById: admin.id,
+      adminNote: "Added directly by admin.",
     };
-
-    if (accessRequestColumns.has("reviewedAt")) {
-      accessRequestData.reviewedAt = new Date();
-    }
-    if (accessRequestColumns.has("reviewedById")) {
-      accessRequestData.reviewedById = admin.id;
-    }
-    if (accessRequestColumns.has("adminNote")) {
-      accessRequestData.adminNote = "Added directly by admin.";
-    }
 
     const member = await prisma.user.upsert({
       where: { email: parsed.data.email },
@@ -153,10 +148,19 @@ export async function POST(request: Request) {
       },
     });
 
-    await prisma.accessRequest.updateMany({
-      where: { email: parsed.data.email },
-      data: accessRequestData,
-    });
+    await prisma.accessRequest
+      .updateMany({
+        where: { email: parsed.data.email },
+        data: accessRequestData,
+      })
+      .catch(async (error) => {
+        console.error("direct member access request sync failed", error);
+
+        await prisma.accessRequest.updateMany({
+          where: { email: parsed.data.email },
+          data: { status: AccessStatus.APPROVED },
+        });
+      });
 
     let setupEmailDelivery: SetupEmailDelivery | null = null;
     const setupToken = await createPasswordSetupTokenWithClient(
@@ -194,9 +198,6 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("direct member create failed", error);
 
-    return NextResponse.json(
-      { error: "Could not add member. Please try again." },
-      { status: 500 },
-    );
+    return routeError("Could not add member", error);
   }
 }

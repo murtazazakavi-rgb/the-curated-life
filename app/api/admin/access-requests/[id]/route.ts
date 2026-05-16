@@ -18,11 +18,7 @@ import {
   EventVisibility,
   UserRole,
 } from "@/lib/generated/prisma/enums";
-import {
-  getTableColumns,
-  hasEventLifecycleSchema,
-  hasPasswordSetupSchema,
-} from "@/lib/events/lifecycle";
+import { hasEventLifecycleSchema } from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 import { accessDecisionSchema } from "@/lib/validators/access";
 
@@ -84,35 +80,46 @@ function setupEmailNotNeeded(): SetupEmailDelivery {
   };
 }
 
+function routeError(message: string, error: unknown) {
+  const detail = error instanceof Error ? error.message : "";
+
+  return NextResponse.json(
+    {
+      error: detail ? `${message}: ${detail}` : message,
+    },
+    { status: 500 },
+  );
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const admin = await getAuthorizedAdmin();
-
-  if (!admin) {
-    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
-  }
-
-  const { id } = await context.params;
-  const body = await request.json().catch(() => null);
-  const parsed = accessDecisionSchema.safeParse(body);
-
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Unknown review action." }, { status: 400 });
-  }
-
-  const statusByAction = {
-    approve: AccessStatus.APPROVED,
-    decline: AccessStatus.DECLINED,
-    waitlist: AccessStatus.WAITLISTED,
-    resend_setup: AccessStatus.APPROVED,
-  } as const;
-
-  const status = statusByAction[parsed.data.action];
-  const prisma = getPrisma();
-
   try {
+    const admin = await getAuthorizedAdmin();
+
+    if (!admin) {
+      return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+    }
+
+    const { id } = await context.params;
+    const body = await request.json().catch(() => null);
+    const parsed = accessDecisionSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Unknown review action." }, { status: 400 });
+    }
+
+    const statusByAction = {
+      approve: AccessStatus.APPROVED,
+      decline: AccessStatus.DECLINED,
+      waitlist: AccessStatus.WAITLISTED,
+      resend_setup: AccessStatus.APPROVED,
+    } as const;
+
+    const status = statusByAction[parsed.data.action];
+    const prisma = getPrisma();
+
     const existingRequest = await prisma.accessRequest.findUnique({
       where: { id },
       select: {
@@ -128,16 +135,6 @@ export async function PATCH(
       return NextResponse.json(
         { error: "Access request not found." },
         { status: 404 },
-      );
-    }
-
-    if (
-      status === AccessStatus.APPROVED &&
-      !(await hasPasswordSetupSchema(prisma))
-    ) {
-      return NextResponse.json(
-        { error: "Approving members needs the password setup database migration." },
-        { status: 503 },
       );
     }
 
@@ -157,7 +154,6 @@ export async function PATCH(
       );
     }
 
-    const accessRequestColumns = await getTableColumns(prisma, "AccessRequest");
     const reviewData: {
       status?: AccessStatus;
       reviewedAt?: Date;
@@ -167,11 +163,11 @@ export async function PATCH(
 
     if (parsed.data.action !== "resend_setup") {
       reviewData.status = status;
-      if (accessRequestColumns.has("reviewedAt")) reviewData.reviewedAt = new Date();
-      if (accessRequestColumns.has("reviewedById")) reviewData.reviewedById = admin.id;
+      reviewData.reviewedAt = new Date();
+      reviewData.reviewedById = admin.id;
     }
 
-    if (parsed.data.adminNote && accessRequestColumns.has("adminNote")) {
+    if (parsed.data.adminNote) {
       reviewData.adminNote = parsed.data.adminNote;
     }
 
@@ -181,17 +177,33 @@ export async function PATCH(
 
     const accessRequest =
       Object.keys(reviewData).length > 0
-        ? await prisma.accessRequest.update({
-            where: { id },
-            data: reviewData,
-            select: {
-              id: true,
-              fullName: true,
-              email: true,
-              referredBy: true,
-              status: true,
-            },
-          })
+        ? await prisma.accessRequest
+            .update({
+              where: { id },
+              data: reviewData,
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                referredBy: true,
+                status: true,
+              },
+            })
+            .catch(async (error) => {
+              console.error("access request review metadata update failed", error);
+
+              return prisma.accessRequest.update({
+                where: { id },
+                data: { status },
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true,
+                  referredBy: true,
+                  status: true,
+                },
+              });
+            })
         : existingRequest;
 
     if (status === AccessStatus.APPROVED) {
@@ -354,9 +366,6 @@ export async function PATCH(
   } catch (error) {
     console.error("access request review failed", error);
 
-    return NextResponse.json(
-      { error: "Could not update access request. Please try again." },
-      { status: 500 },
-    );
+    return routeError("Could not update access request", error);
   }
 }

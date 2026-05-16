@@ -675,12 +675,24 @@ export function AdminConsole({
 
     try {
       const response = await fetch(url, init);
-      const payload = (await response.json().catch(() => ({}))) as {
-        error?: string;
-      } & T;
+      const responseText = await response.text();
+      let payload = {} as { error?: string } & T;
+
+      try {
+        payload = responseText
+          ? (JSON.parse(responseText) as { error?: string } & T)
+          : payload;
+      } catch {
+        payload = {
+          error: responseText,
+        } as { error?: string } & T;
+      }
 
       if (!response.ok) {
-        throw new Error(payload.error ?? fallbackError);
+        throw new Error(
+          payload.error ||
+            `${fallbackError} Server returned status ${response.status}.`,
+        );
       }
 
       return payload as T;
@@ -856,6 +868,18 @@ export function AdminConsole({
 
       return [body.member, ...current];
     });
+    setRequestState((current) =>
+      current.map((request) =>
+        request.email.toLowerCase() === body.member.email.toLowerCase()
+          ? {
+              ...request,
+              status: "APPROVED",
+              adminNote: request.adminNote ?? "Added directly by admin.",
+              reviewedAt: request.reviewedAt ?? new Date().toISOString(),
+            }
+          : request,
+      ),
+    );
     form.reset();
     setIsAddingMember(false);
     const nextToast = setupEmailToast(body.setupEmailDelivery, {
