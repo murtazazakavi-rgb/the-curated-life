@@ -15,6 +15,7 @@ export type EmailDeliveryResult = {
   status: "sent" | "skipped";
   provider: "resend" | "smtp" | "none";
   messageId?: string;
+  message?: string;
 };
 
 let transporter: nodemailer.Transporter<SMTPTransport.SentMessageInfo> | null = null;

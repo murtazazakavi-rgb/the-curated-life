@@ -47,11 +47,12 @@ function serializeMember(member: MemberRecord) {
   };
 }
 
-function failedSetupEmailDelivery(): SetupEmailDelivery {
+function failedSetupEmailDelivery(message?: string): SetupEmailDelivery {
   return {
     status: "failed",
     provider: "unknown",
-    message: "Setup email could not be sent. Check your email provider settings.",
+    message:
+      message ?? "Setup email could not be sent. Check your email provider settings.",
   };
 }
 
@@ -120,63 +121,70 @@ export async function POST(request: Request) {
       accessRequestData.adminNote = "Added directly by admin.";
     }
 
-    let setupToken = "";
-    const member = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.upsert({
-        where: { email: parsed.data.email },
-        update: {
-          fullName: parsed.data.fullName,
-          accessStatus: AccessStatus.APPROVED,
-          role:
-            isAdminEmail(parsed.data.email) || parsed.data.role === UserRole.ADMIN
-              ? UserRole.ADMIN
-              : UserRole.MEMBER,
-          suspendedAt: null,
-        },
-        create: {
-          email: parsed.data.email,
-          fullName: parsed.data.fullName,
-          accessStatus: AccessStatus.APPROVED,
-          role:
-            isAdminEmail(parsed.data.email) || parsed.data.role === UserRole.ADMIN
-              ? UserRole.ADMIN
-              : UserRole.MEMBER,
-        },
-        select: {
-          id: true,
-          fullName: true,
-          email: true,
-          role: true,
-          accessStatus: true,
-          passwordSetAt: true,
-          suspendedAt: true,
-          createdAt: true,
-        },
+    const member = await prisma.user.upsert({
+      where: { email: parsed.data.email },
+      update: {
+        fullName: parsed.data.fullName,
+        accessStatus: AccessStatus.APPROVED,
+        role:
+          isAdminEmail(parsed.data.email) || parsed.data.role === UserRole.ADMIN
+            ? UserRole.ADMIN
+            : UserRole.MEMBER,
+        suspendedAt: null,
+      },
+      create: {
+        email: parsed.data.email,
+        fullName: parsed.data.fullName,
+        accessStatus: AccessStatus.APPROVED,
+        role:
+          isAdminEmail(parsed.data.email) || parsed.data.role === UserRole.ADMIN
+            ? UserRole.ADMIN
+            : UserRole.MEMBER,
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        accessStatus: true,
+        passwordSetAt: true,
+        suspendedAt: true,
+        createdAt: true,
+      },
+    });
+
+    await prisma.accessRequest.updateMany({
+      where: { email: parsed.data.email },
+      data: accessRequestData,
+    });
+
+    let setupEmailDelivery: SetupEmailDelivery | null = null;
+    const setupToken = await createPasswordSetupTokenWithClient(
+      prisma,
+      member.id,
+    ).catch((error) => {
+      console.error("password setup token create failed", error);
+      setupEmailDelivery = failedSetupEmailDelivery(
+        "Member was added, but the setup token could not be created.",
+      );
+      return null;
+    });
+
+    if (setupToken) {
+      const email = directMemberSetPasswordEmail({
+        name: member.fullName,
+        setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
       });
 
-      await tx.accessRequest.updateMany({
-        where: { email: parsed.data.email },
-        data: accessRequestData,
+      setupEmailDelivery = await sendTransactionalEmail({
+        to: member.email,
+        templateKey: "direct_member_set_password",
+        ...email,
+      }).catch((error) => {
+        console.error("direct_member_set_password email failed", error);
+        return failedSetupEmailDelivery();
       });
-
-      setupToken = await createPasswordSetupTokenWithClient(tx, user.id);
-
-      return user;
-    });
-
-    const email = directMemberSetPasswordEmail({
-      name: member.fullName,
-      setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
-    });
-
-    const setupEmailDelivery = await sendTransactionalEmail({
-      to: member.email,
-      templateKey: "direct_member_set_password",
-      ...email,
-    }).catch((error) => {
-      console.error("direct_member_set_password email failed", error);
-      return failedSetupEmailDelivery();
-    });
+    }
 
     return NextResponse.json({
       ok: true,

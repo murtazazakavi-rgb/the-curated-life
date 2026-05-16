@@ -156,7 +156,7 @@ type Toast = {
 } | null;
 
 type SetupEmailDeliveryView = {
-  status: "sent" | "skipped" | "failed";
+  status: "sent" | "skipped" | "failed" | "not_needed";
   provider: string;
   message?: string;
 } | null;
@@ -338,10 +338,17 @@ function setupEmailToast(
     };
   }
 
+  if (delivery.status === "not_needed") {
+    return {
+      tone: "success",
+      message: delivery.message ?? `${messages.sent}.`,
+    };
+  }
+
   if (delivery.status === "skipped") {
     return {
       tone: "error",
-      message: messages.skipped,
+      message: delivery.message ?? messages.skipped,
     };
   }
 

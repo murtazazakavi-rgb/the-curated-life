@@ -45,6 +45,11 @@ type SetupEmailDelivery =
       status: "failed";
       provider: "unknown";
       message: string;
+    }
+  | {
+      status: "not_needed";
+      provider: "none";
+      message: string;
     };
 
 function serializeMember(member: ReviewedMember | null) {
@@ -62,11 +67,20 @@ function serializeMember(member: ReviewedMember | null) {
   };
 }
 
-function failedSetupEmailDelivery(): SetupEmailDelivery {
+function failedSetupEmailDelivery(message?: string): SetupEmailDelivery {
   return {
     status: "failed",
     provider: "unknown",
-    message: "Setup email could not be sent. Check your email provider settings.",
+    message:
+      message ?? "Setup email could not be sent. Check your email provider settings.",
+  };
+}
+
+function setupEmailNotNeeded(): SetupEmailDelivery {
+  return {
+    status: "not_needed",
+    provider: "none",
+    message: "Access approved. This member already has a password, so no setup email was sent.",
   };
 }
 
@@ -129,7 +143,7 @@ export async function PATCH(
 
     const previousUser = await prisma.user.findUnique({
       where: { email: existingRequest.email },
-      select: { role: true },
+      select: { role: true, passwordSetAt: true },
     });
 
     if (
@@ -165,76 +179,82 @@ export async function PATCH(
     let reviewedMember: ReviewedMember | null = null;
     let setupEmailDelivery: SetupEmailDelivery | null = null;
 
-    const accessRequest = await prisma.$transaction(async (tx) => {
-      const nextRequest =
-        Object.keys(reviewData).length > 0
-          ? await tx.accessRequest.update({
-              where: { id },
-              data: reviewData,
-              select: {
-                id: true,
-                fullName: true,
-                email: true,
-                referredBy: true,
-                status: true,
-              },
-            })
-          : existingRequest;
+    const accessRequest =
+      Object.keys(reviewData).length > 0
+        ? await prisma.accessRequest.update({
+            where: { id },
+            data: reviewData,
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              referredBy: true,
+              status: true,
+            },
+          })
+        : existingRequest;
 
-      if (status === AccessStatus.APPROVED) {
-        const user = await tx.user.upsert({
-          where: { email: nextRequest.email },
-          update: {
-            fullName: nextRequest.fullName,
-            accessStatus: AccessStatus.APPROVED,
-            role:
-              isAdminEmail(nextRequest.email) ||
-              previousUser?.role === UserRole.ADMIN
-                ? UserRole.ADMIN
-                : UserRole.MEMBER,
-            referredBy: nextRequest.referredBy,
-          },
-          create: {
-            email: nextRequest.email,
-            fullName: nextRequest.fullName,
-            accessStatus: AccessStatus.APPROVED,
-            role: isAdminEmail(nextRequest.email)
+    if (status === AccessStatus.APPROVED) {
+      const user = await prisma.user.upsert({
+        where: { email: accessRequest.email },
+        update: {
+          fullName: accessRequest.fullName,
+          accessStatus: AccessStatus.APPROVED,
+          role:
+            isAdminEmail(accessRequest.email) || previousUser?.role === UserRole.ADMIN
               ? UserRole.ADMIN
               : UserRole.MEMBER,
-            referredBy: nextRequest.referredBy,
+          referredBy: accessRequest.referredBy,
+        },
+        create: {
+          email: accessRequest.email,
+          fullName: accessRequest.fullName,
+          accessStatus: AccessStatus.APPROVED,
+          role: isAdminEmail(accessRequest.email) ? UserRole.ADMIN : UserRole.MEMBER,
+          referredBy: accessRequest.referredBy,
+        },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          accessStatus: true,
+          passwordSetAt: true,
+          suspendedAt: true,
+          createdAt: true,
+        },
+      });
+
+      reviewedMember = user;
+
+      if (user.passwordSetAt) {
+        setupEmailDelivery = setupEmailNotNeeded();
+      } else {
+        setupToken = await createPasswordSetupTokenWithClient(prisma, user.id).catch(
+          (error) => {
+            console.error("password setup token create failed", error);
+            setupEmailDelivery = failedSetupEmailDelivery(
+              "Setup token could not be created. The member was approved, but no setup email was sent.",
+            );
+            return null;
           },
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-            role: true,
-            accessStatus: true,
-            passwordSetAt: true,
-            suspendedAt: true,
-            createdAt: true,
-          },
-        });
-
-        setupToken = await createPasswordSetupTokenWithClient(tx, user.id);
-        reviewedMember = user;
+        );
       }
+    }
 
-      if (status === AccessStatus.DECLINED) {
-        await tx.user.updateMany({
-          where: { email: nextRequest.email },
-          data: { accessStatus: AccessStatus.DECLINED },
-        });
-      }
+    if (status === AccessStatus.DECLINED) {
+      await prisma.user.updateMany({
+        where: { email: accessRequest.email },
+        data: { accessStatus: AccessStatus.DECLINED },
+      });
+    }
 
-      if (status === AccessStatus.WAITLISTED) {
-        await tx.user.updateMany({
-          where: { email: nextRequest.email },
-          data: { accessStatus: AccessStatus.WAITLISTED },
-        });
-      }
-
-      return nextRequest;
-    });
+    if (status === AccessStatus.WAITLISTED) {
+      await prisma.user.updateMany({
+        where: { email: accessRequest.email },
+        data: { accessStatus: AccessStatus.WAITLISTED },
+      });
+    }
 
     if (status !== AccessStatus.APPROVED && previousUser) {
       reviewedMember = await prisma.user.findUnique({
