@@ -89,6 +89,28 @@ export const experienceLifecycleSchema = z.object({
   cancellationReason: z.string().trim().max(1200).optional().or(z.literal("")),
 });
 
+export const eventDetailsEmailSchema = z.object({
+  subject: z.string().trim().min(3).max(180),
+  recipientStatuses: z
+    .array(
+      z.enum([
+        "REQUESTED",
+        "CONFIRMED",
+        "WAITLISTED",
+        "CANCELLATION_REQUESTED",
+      ]),
+    )
+    .min(1)
+    .max(4),
+  meetingPoint: z.string().trim().min(3).max(220),
+  arrivalWindow: z.string().trim().max(180).optional().or(z.literal("")),
+  locationDetails: z.string().trim().max(700).optional().or(z.literal("")),
+  dressCode: z.string().trim().max(220).optional().or(z.literal("")),
+  whatToBring: z.string().trim().max(320).optional().or(z.literal("")),
+  contact: z.string().trim().max(220).optional().or(z.literal("")),
+  note: z.string().trim().max(1200).optional().or(z.literal("")),
+});
+
 export const loginSchema = z.object({
   email: z.string().trim().email().max(180).transform((value) => value.toLowerCase()),
   password: z.string().min(1).max(256),

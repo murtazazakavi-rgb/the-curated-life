@@ -385,6 +385,68 @@ export function eventCancelledEmail(input: {
   };
 }
 
+export function eventDetailsEmail(input: {
+  name: string;
+  subject: string;
+  experienceTitle: string;
+  when: string;
+  location: string;
+  meetingPoint: string;
+  arrivalWindow?: string | null;
+  locationDetails?: string | null;
+  dressCode?: string | null;
+  whatToBring?: string | null;
+  contact?: string | null;
+  note?: string | null;
+  memberUrl: string;
+}): EmailTemplate {
+  const title = "Your event details are ready.";
+  const rows: Array<[string, string | null | undefined]> = [
+    ["Experience", input.experienceTitle],
+    ["When", input.when],
+    ["Where", input.location],
+    ["Meeting point", input.meetingPoint],
+    ["Arrival", input.arrivalWindow],
+    ["Location notes", input.locationDetails],
+    ["Dress code", input.dressCode],
+    ["What to bring", input.whatToBring],
+    ["Contact", input.contact],
+  ];
+  const bodyText = [
+    `Dear ${input.name}, here are the details for ${input.experienceTitle}.`,
+    `When: ${input.when}`,
+    `Where: ${input.location}`,
+    `Meeting point: ${input.meetingPoint}`,
+    input.arrivalWindow ? `Arrival: ${input.arrivalWindow}` : "",
+    input.locationDetails ? `Location notes: ${input.locationDetails}` : "",
+    input.dressCode ? `Dress code: ${input.dressCode}` : "",
+    input.whatToBring ? `What to bring: ${input.whatToBring}` : "",
+    input.contact ? `Contact: ${input.contact}` : "",
+    input.note ? `Note: ${input.note}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    subject: input.subject,
+    html: baseEmail({
+      title,
+      eyebrow: "Event Details",
+      body: [
+        paragraph(
+          `Dear ${input.name}, here are the details for ${input.experienceTitle}.`,
+        ),
+        details(rows),
+        input.note ? paragraph(input.note) : "",
+      ].join(""),
+      ctaLabel: "View Reservation",
+      ctaUrl: input.memberUrl,
+      note: "If anything changes, we will write again by email.",
+    }),
+    text: asText(title, bodyText, input.memberUrl),
+  };
+}
+
 export function adminCancellationRequestedEmail(input: {
   memberName: string;
   memberEmail: string;

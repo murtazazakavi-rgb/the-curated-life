@@ -88,7 +88,17 @@ async function getAdminConsoleData() {
             isInviteOnly: true,
             isArchived: true,
             reservations: {
-              select: { id: true, status: true },
+              select: {
+                id: true,
+                status: true,
+                createdAt: true,
+                user: {
+                  select: {
+                    fullName: true,
+                    email: true,
+                  },
+                },
+              },
             },
           },
         }),
@@ -152,12 +162,24 @@ async function getAdminConsoleData() {
           waitlistedCount: experience.reservations.filter(
             (reservation) => reservation.status === ReservationStatus.WAITLISTED,
           ).length,
+          requestedCount: experience.reservations.filter(
+            (reservation) => reservation.status === ReservationStatus.REQUESTED,
+          ).length,
           cancellationRequestCount: 0,
           reservationCount: experience.reservations.length,
           remainingSeats:
             experience.seatsTotal === null
               ? null
               : Math.max(experience.seatsTotal - confirmedCount, 0),
+          attendees: experience.reservations.map((reservation) => ({
+            id: reservation.id,
+            status: reservation.status,
+            createdAt: reservation.createdAt.toISOString(),
+            memberName: reservation.user.fullName,
+            memberEmail: reservation.user.email,
+            cancellationRequestedAt: null,
+            cancellationReason: null,
+          })),
         };
       }),
       reservations: reservations.map((reservation) => ({
@@ -194,7 +216,19 @@ async function getAdminConsoleData() {
       orderBy: { dateTime: "asc" },
       include: {
         reservations: {
-          select: { id: true, status: true },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            cancellationRequestedAt: true,
+            cancellationReason: true,
+            user: {
+              select: {
+                fullName: true,
+                email: true,
+              },
+            },
+          },
         },
         audienceMembers: {
           select: { userId: true },
@@ -258,6 +292,9 @@ async function getAdminConsoleData() {
         waitlistedCount: experience.reservations.filter(
           (reservation) => reservation.status === ReservationStatus.WAITLISTED,
         ).length,
+        requestedCount: experience.reservations.filter(
+          (reservation) => reservation.status === ReservationStatus.REQUESTED,
+        ).length,
         cancellationRequestCount: experience.reservations.filter(
           (reservation) =>
             reservation.status === ReservationStatus.CANCELLATION_REQUESTED,
@@ -267,6 +304,16 @@ async function getAdminConsoleData() {
           experience.seatsTotal === null
             ? null
             : Math.max(experience.seatsTotal - confirmedCount, 0),
+        attendees: experience.reservations.map((reservation) => ({
+          id: reservation.id,
+          status: reservation.status,
+          createdAt: reservation.createdAt.toISOString(),
+          memberName: reservation.user.fullName,
+          memberEmail: reservation.user.email,
+          cancellationRequestedAt:
+            reservation.cancellationRequestedAt?.toISOString() ?? null,
+          cancellationReason: reservation.cancellationReason,
+        })),
       };
     }),
     reservations: reservations.map((reservation) => ({

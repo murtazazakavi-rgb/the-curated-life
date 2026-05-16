@@ -6,12 +6,14 @@ import { sendTransactionalEmail } from "@/lib/email/send";
 import {
   eventAnnouncementEmail,
   eventCancelledEmail,
+  eventDetailsEmail,
   eventPostponedEmail,
 } from "@/lib/email/templates";
 import { siteUrl } from "@/lib/email/templates/base";
 import {
   EventStatus,
   EventVisibility,
+  ReservationStatus,
 } from "@/lib/generated/prisma/enums";
 import {
   activeApprovedMembersWhere,
@@ -22,6 +24,7 @@ import {
 } from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 import {
+  eventDetailsEmailSchema,
   experienceAdminSchema,
   experienceLifecycleSchema,
 } from "@/lib/validators/access";
@@ -340,6 +343,109 @@ export async function PATCH(
         ? (experienceView.audienceMembers ?? []).map((member) => member.userId)
         : [],
     },
+  });
+}
+
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const admin = await getAuthorizedAdmin();
+
+  if (!admin) {
+    return NextResponse.json({ error: "Admin access required." }, { status: 403 });
+  }
+
+  const { id } = await context.params;
+  const body = await request.json().catch(() => null);
+  const parsed = eventDetailsEmailSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Please review the event details email." },
+      { status: 400 },
+    );
+  }
+
+  const recipientStatuses = parsed.data.recipientStatuses as ReservationStatus[];
+  const prisma = getPrisma();
+  const experience = await prisma.experience.findUnique({
+    where: { id },
+    include: {
+      reservations: {
+        where: {
+          status: {
+            in: recipientStatuses,
+          },
+        },
+        include: {
+          user: {
+            select: {
+              email: true,
+              fullName: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!experience) {
+    return NextResponse.json({ error: "Event not found." }, { status: 404 });
+  }
+
+  if (!experience.reservations.length) {
+    return NextResponse.json(
+      { error: "No registered members match the selected recipient group." },
+      { status: 400 },
+    );
+  }
+
+  const deliveries = await Promise.all(
+    experience.reservations.map(async (reservation) => {
+      const email = eventDetailsEmail({
+        name: reservation.user.fullName,
+        subject: parsed.data.subject,
+        experienceTitle: experience.title,
+        when: formatExperienceDate(experience.dateTime),
+        location: experience.location,
+        meetingPoint: parsed.data.meetingPoint,
+        arrivalWindow: parsed.data.arrivalWindow,
+        locationDetails: parsed.data.locationDetails,
+        dressCode: parsed.data.dressCode,
+        whatToBring: parsed.data.whatToBring,
+        contact: parsed.data.contact,
+        note: parsed.data.note,
+        memberUrl: siteUrl("/member"),
+      });
+
+      try {
+        return await sendTransactionalEmail({
+          to: reservation.user.email,
+          templateKey: "event_details",
+          ...email,
+        });
+      } catch (error) {
+        console.error("event details email failed", error);
+        return { status: "failed" as const };
+      }
+    }),
+  );
+
+  const sentCount = deliveries.filter((delivery) => delivery.status === "sent").length;
+  const skippedCount = deliveries.filter(
+    (delivery) => delivery.status === "skipped",
+  ).length;
+  const failedCount = deliveries.filter(
+    (delivery) => delivery.status === "failed",
+  ).length;
+
+  return NextResponse.json({
+    ok: true,
+    recipientCount: experience.reservations.length,
+    sentCount,
+    skippedCount,
+    failedCount,
   });
 }
 

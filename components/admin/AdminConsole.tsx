@@ -21,6 +21,16 @@ type AccessRequestView = {
   createdAt: string;
 };
 
+type ExperienceAttendeeView = {
+  id: string;
+  status: string;
+  createdAt: string;
+  memberName: string;
+  memberEmail: string;
+  cancellationRequestedAt?: string | null;
+  cancellationReason?: string | null;
+};
+
 type ExperienceView = {
   id: string;
   title: string;
@@ -48,27 +58,33 @@ type ExperienceView = {
   attendeeVisibilityEnabled: boolean;
   selectedMemberIds: string[];
   confirmedCount: number;
+  requestedCount: number;
   waitlistedCount: number;
   cancellationRequestCount: number;
   reservationCount: number;
   remainingSeats?: number | null;
+  attendees: ExperienceAttendeeView[];
 };
 
 type ExperienceApiView = Omit<
   ExperienceView,
   | "confirmedCount"
+  | "requestedCount"
   | "waitlistedCount"
   | "cancellationRequestCount"
   | "reservationCount"
   | "remainingSeats"
   | "selectedMemberIds"
+  | "attendees"
 > & {
   confirmedCount?: number;
+  requestedCount?: number;
   waitlistedCount?: number;
   cancellationRequestCount?: number;
   reservationCount?: number;
   remainingSeats?: number | null;
   selectedMemberIds?: string[];
+  attendees?: ExperienceAttendeeView[];
 };
 
 type ReservationView = {
@@ -150,6 +166,10 @@ type AdminTab =
   | "referrals"
   | "emails";
 
+type EventFilter = "ACTIVE" | "LIVE" | "NEEDS_REVIEW" | "DRAFT" | "PAST" | "ALL";
+
+type EventSort = "PRIORITY" | "DATE_ASC" | "DATE_DESC" | "JOINED_DESC" | "OPEN_ASC";
+
 type Toast = {
   tone: "success" | "error";
   message: string;
@@ -160,6 +180,13 @@ type SetupEmailDeliveryView = {
   provider: string;
   message?: string;
 } | null;
+
+type EventDetailsDeliveryView = {
+  recipientCount: number;
+  sentCount: number;
+  skippedCount: number;
+  failedCount: number;
+};
 
 type AccessAction = "approve" | "decline" | "waitlist" | "resend_setup";
 
@@ -208,6 +235,21 @@ const adminTabs: Array<{ id: AdminTab; label: string }> = [
 
 const MAX_EVENT_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_EVENT_IMAGE_WIDTH = 1800;
+const RESERVATION_STATUS_GROUPS = [
+  "CONFIRMED",
+  "REQUESTED",
+  "WAITLISTED",
+  "CANCELLATION_REQUESTED",
+  "CANCELLED",
+];
+
+const eventSortOptions: Array<{ id: EventSort; label: string }> = [
+  { id: "PRIORITY", label: "Priority" },
+  { id: "DATE_ASC", label: "Soonest" },
+  { id: "DATE_DESC", label: "Latest" },
+  { id: "JOINED_DESC", label: "Most joined" },
+  { id: "OPEN_ASC", label: "Fewest open" },
+];
 
 function formatFileSize(bytes: number) {
   if (!bytes) return "0 KB";
@@ -303,6 +345,103 @@ function toDateTimeLocal(value: string) {
 function seatsLabel(experience: ExperienceView) {
   if (!experience.seatsTotal) return `${experience.confirmedCount} confirmed`;
   return `${experience.confirmedCount}/${experience.seatsTotal} confirmed · ${experience.remainingSeats ?? 0} open`;
+}
+
+function joinedCount(experience: ExperienceView) {
+  return experience.confirmedCount + experience.requestedCount;
+}
+
+function sameLocalDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function isPastEvent(experience: ExperienceView, now: Date) {
+  return new Date(experience.dateTime).getTime() < now.getTime();
+}
+
+function isLiveToMembers(experience: ExperienceView, now: Date) {
+  return experience.status === "PUBLISHED" && !isPastEvent(experience, now);
+}
+
+function isNeedsReview(experience: ExperienceView) {
+  return experience.requestedCount > 0 || experience.cancellationRequestCount > 0;
+}
+
+function eventTimingLabel(experience: ExperienceView, now: Date) {
+  const eventDate = new Date(experience.dateTime);
+
+  if (isNeedsReview(experience)) return "Needs review";
+  if (isLiveToMembers(experience, now)) {
+    return sameLocalDay(eventDate, now) ? "Live today" : "Live to members";
+  }
+  if (isPastEvent(experience, now)) return "Past event";
+  if (experience.status === "DRAFT") return "Upcoming draft";
+  if (experience.status === "POSTPONED") return "Postponed";
+  if (experience.status === "CANCELLED") return "Cancelled";
+  if (experience.status === "ARCHIVED") return "Archived";
+  return "Scheduled";
+}
+
+function eventPriorityRank(experience: ExperienceView, now: Date) {
+  if (experience.cancellationRequestCount > 0) return 0;
+  if (experience.requestedCount > 0) return 1;
+  if (isLiveToMembers(experience, now)) return 2;
+  if (experience.status === "DRAFT" && !isPastEvent(experience, now)) return 3;
+  if (experience.status === "POSTPONED") return 4;
+  if (experience.status === "CANCELLED") return 5;
+  if (isPastEvent(experience, now)) return 6;
+  return 7;
+}
+
+function matchesEventFilter(
+  experience: ExperienceView,
+  filter: EventFilter,
+  now: Date,
+) {
+  if (filter === "ALL") return true;
+  if (filter === "LIVE") return isLiveToMembers(experience, now);
+  if (filter === "NEEDS_REVIEW") return isNeedsReview(experience);
+  if (filter === "DRAFT") return experience.status === "DRAFT";
+  if (filter === "PAST") {
+    return (
+      isPastEvent(experience, now) ||
+      experience.status === "ARCHIVED" ||
+      experience.status === "CANCELLED"
+    );
+  }
+  return (
+    isNeedsReview(experience) ||
+    isLiveToMembers(experience, now) ||
+    (experience.status === "DRAFT" && !isPastEvent(experience, now))
+  );
+}
+
+function sortEvents(events: ExperienceView[], sort: EventSort, now: Date) {
+  return [...events].sort((left, right) => {
+    const leftTime = new Date(left.dateTime).getTime();
+    const rightTime = new Date(right.dateTime).getTime();
+
+    if (sort === "DATE_ASC") return leftTime - rightTime;
+    if (sort === "DATE_DESC") return rightTime - leftTime;
+    if (sort === "JOINED_DESC") {
+      return joinedCount(right) - joinedCount(left) || leftTime - rightTime;
+    }
+    if (sort === "OPEN_ASC") {
+      const leftOpen = left.remainingSeats ?? Number.POSITIVE_INFINITY;
+      const rightOpen = right.remainingSeats ?? Number.POSITIVE_INFINITY;
+
+      return leftOpen - rightOpen || leftTime - rightTime;
+    }
+
+    return (
+      eventPriorityRank(left, now) - eventPriorityRank(right, now) ||
+      leftTime - rightTime
+    );
+  });
 }
 
 function prettyStatus(value: string) {
@@ -413,13 +552,47 @@ function hydrateExperience(
     ...next,
     seatsTotal,
     confirmedCount,
+    requestedCount: next.requestedCount ?? current.requestedCount,
     reservationCount: next.reservationCount ?? current.reservationCount,
     waitlistedCount: next.waitlistedCount ?? current.waitlistedCount,
     cancellationRequestCount:
       next.cancellationRequestCount ?? current.cancellationRequestCount,
     selectedMemberIds: next.selectedMemberIds ?? current.selectedMemberIds,
+    attendees: next.attendees ?? current.attendees,
     remainingSeats:
       seatsTotal === null ? null : Math.max(seatsTotal - confirmedCount, 0),
+  };
+}
+
+function withRecountedAttendees(
+  experience: ExperienceView,
+  attendees: ExperienceAttendeeView[],
+) {
+  const confirmedCount = attendees.filter(
+    (attendee) => attendee.status === "CONFIRMED",
+  ).length;
+  const requestedCount = attendees.filter(
+    (attendee) => attendee.status === "REQUESTED",
+  ).length;
+  const waitlistedCount = attendees.filter(
+    (attendee) => attendee.status === "WAITLISTED",
+  ).length;
+  const cancellationRequestCount = attendees.filter(
+    (attendee) => attendee.status === "CANCELLATION_REQUESTED",
+  ).length;
+
+  return {
+    ...experience,
+    attendees,
+    confirmedCount,
+    requestedCount,
+    waitlistedCount,
+    cancellationRequestCount,
+    reservationCount: attendees.length,
+    remainingSeats:
+      experience.seatsTotal == null
+        ? null
+        : Math.max(experience.seatsTotal - confirmedCount, 0),
   };
 }
 
@@ -552,6 +725,8 @@ export function AdminConsole({
   const [requestFilter, setRequestFilter] = useState("ALL");
   const [requestSearch, setRequestSearch] = useState("");
   const [memberSearch, setMemberSearch] = useState("");
+  const [eventFilter, setEventFilter] = useState<EventFilter>("ACTIVE");
+  const [eventSort, setEventSort] = useState<EventSort>("PRIORITY");
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
   const [requestNote, setRequestNote] = useState("");
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -560,6 +735,8 @@ export function AdminConsole({
   const [editingExperienceId, setEditingExperienceId] = useState<string | null>(null);
   const [isCreatingExperience, setIsCreatingExperience] = useState(false);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const [guestEventId, setGuestEventId] = useState<string | null>(null);
+  const [detailsEventId, setDetailsEventId] = useState<string | null>(null);
   const [lifecycleTarget, setLifecycleTarget] = useState<{
     id: string;
     action: "publish" | "unpublish" | "postpone" | "cancel" | "archive";
@@ -580,6 +757,12 @@ export function AdminConsole({
   );
   const deleteTarget = experienceState.find(
     (experience) => experience.id === deleteTargetId,
+  );
+  const guestEvent = experienceState.find(
+    (experience) => experience.id === guestEventId,
+  );
+  const detailsEvent = experienceState.find(
+    (experience) => experience.id === detailsEventId,
   );
   const lifecycleExperience = experienceState.find(
     (experience) => experience.id === lifecycleTarget?.id,
@@ -611,6 +794,83 @@ export function AdminConsole({
         member.email.toLowerCase().includes(q),
     );
   }, [memberSearch, memberState]);
+
+  const eventNow = useMemo(() => new Date(), []);
+
+  const filteredEvents = useMemo(() => {
+    const matchingEvents = experienceState.filter((experience) =>
+      matchesEventFilter(experience, eventFilter, eventNow),
+    );
+
+    return sortEvents(matchingEvents, eventSort, eventNow);
+  }, [eventFilter, eventNow, eventSort, experienceState]);
+
+  const eventFilterOptions: Array<{ id: EventFilter; label: string; count: number }> = [
+    {
+      id: "ACTIVE",
+      label: "Active",
+      count: experienceState.filter((experience) =>
+        matchesEventFilter(experience, "ACTIVE", eventNow),
+      ).length,
+    },
+    {
+      id: "LIVE",
+      label: "Live",
+      count: experienceState.filter((experience) =>
+        matchesEventFilter(experience, "LIVE", eventNow),
+      ).length,
+    },
+    {
+      id: "NEEDS_REVIEW",
+      label: "Needs Review",
+      count: experienceState.filter((experience) => isNeedsReview(experience))
+        .length,
+    },
+    {
+      id: "DRAFT",
+      label: "Drafts",
+      count: experienceState.filter((experience) => experience.status === "DRAFT")
+        .length,
+    },
+    {
+      id: "PAST",
+      label: "Past",
+      count: experienceState.filter((experience) =>
+        matchesEventFilter(experience, "PAST", eventNow),
+      ).length,
+    },
+    { id: "ALL", label: "All", count: experienceState.length },
+  ];
+
+  const eventDashboardCards = [
+    {
+      label: "Live to members",
+      value: experienceState.filter((experience) =>
+        isLiveToMembers(experience, eventNow),
+      ).length,
+    },
+    {
+      label: "Joined",
+      value: experienceState.reduce(
+        (total, experience) => total + joinedCount(experience),
+        0,
+      ),
+    },
+    {
+      label: "Pending review",
+      value: experienceState.reduce(
+        (total, experience) => total + experience.requestedCount,
+        0,
+      ),
+    },
+    {
+      label: "Cancellations",
+      value: experienceState.reduce(
+        (total, experience) => total + experience.cancellationRequestCount,
+        0,
+      ),
+    },
+  ];
 
   const dashboardCards = [
     {
@@ -979,11 +1239,13 @@ export function AdminConsole({
         ...body.experience,
         seatsTotal,
         confirmedCount: 0,
+        requestedCount: 0,
         waitlistedCount: 0,
         cancellationRequestCount: 0,
         reservationCount: 0,
         remainingSeats: seatsTotal,
         selectedMemberIds: body.experience.selectedMemberIds ?? [],
+        attendees: body.experience.attendees ?? [],
       },
     ]);
     form.reset();
@@ -1042,6 +1304,56 @@ export function AdminConsole({
     showToast("success", `Event ${prettyStatus(payload.experience.status).toLowerCase()}.`);
   }
 
+  async function sendEventDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!detailsEvent) return;
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const body = await runJson<EventDetailsDeliveryView>(
+      `experience:${detailsEvent.id}:details`,
+      `/api/admin/experiences/${detailsEvent.id}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: fieldValue(formData, "subject"),
+          recipientStatuses: formData.getAll("recipientStatuses").map(String),
+          meetingPoint: fieldValue(formData, "meetingPoint"),
+          arrivalWindow: fieldValue(formData, "arrivalWindow"),
+          locationDetails: fieldValue(formData, "locationDetails"),
+          dressCode: fieldValue(formData, "dressCode"),
+          whatToBring: fieldValue(formData, "whatToBring"),
+          contact: fieldValue(formData, "contact"),
+          note: fieldValue(formData, "note"),
+        }),
+      },
+      "Could not send event details.",
+    );
+
+    if (!body) return;
+
+    setDetailsEventId(null);
+
+    if (body.failedCount > 0) {
+      showToast(
+        "error",
+        `Details sent to ${body.sentCount}, skipped ${body.skippedCount}, failed ${body.failedCount}.`,
+      );
+      return;
+    }
+
+    if (body.skippedCount > 0) {
+      showToast(
+        "error",
+        `Details prepared for ${body.recipientCount}, but ${body.skippedCount} email${body.skippedCount === 1 ? " was" : "s were"} skipped because no provider is configured.`,
+      );
+      return;
+    }
+
+    showToast("success", `Event details emailed to ${body.sentCount} member${body.sentCount === 1 ? "" : "s"}.`);
+  }
+
   async function updateReservation(
     id: string,
     status: "CONFIRMED" | "WAITLISTED" | "CANCELLED",
@@ -1065,6 +1377,22 @@ export function AdminConsole({
           ? { ...reservation, status: payload.reservation.status }
           : reservation,
       ),
+    );
+    setExperienceState((current) =>
+      current.map((experience) => {
+        if (!experience.attendees.some((attendee) => attendee.id === id)) {
+          return experience;
+        }
+
+        return withRecountedAttendees(
+          experience,
+          experience.attendees.map((attendee) =>
+            attendee.id === id
+              ? { ...attendee, status: payload.reservation.status }
+              : attendee,
+          ),
+        );
+      }),
     );
     showToast("success", "Reservation updated and email sent.");
   }
@@ -1093,6 +1421,22 @@ export function AdminConsole({
           ? { ...reservation, status: payload.reservation.status }
           : reservation,
       ),
+    );
+    setExperienceState((current) =>
+      current.map((experience) => {
+        if (!experience.attendees.some((attendee) => attendee.id === id)) {
+          return experience;
+        }
+
+        return withRecountedAttendees(
+          experience,
+          experience.attendees.map((attendee) =>
+            attendee.id === id
+              ? { ...attendee, status: payload.reservation.status }
+              : attendee,
+          ),
+        );
+      }),
     );
     showToast("success", "Cancellation review sent.");
   }
@@ -1331,7 +1675,7 @@ export function AdminConsole({
                 <div>
                   <p className="eyebrow">Events</p>
                   <h2 id="admin-events-title" className="panel-title">
-                    Manage calendar
+                    Monitor calendar
                   </h2>
                 </div>
                 <button
@@ -1342,92 +1686,174 @@ export function AdminConsole({
                   New Event
                 </button>
               </div>
-              <div className="admin-list event-list">
-                {experienceState.map((experience) => (
-                  <article className="admin-list-row is-static event-row" key={experience.id}>
-                    <span className="admin-row-main">
-                      <strong>{experience.title}</strong>
-                      <span>
-                        {formatExperienceDate(experience.dateTime)} · {experience.location}
-                      </span>
-                    </span>
-                    <span className="admin-row-meta event-row__meta">
-                      <span className={`status-pill status-${experience.status.toLowerCase()}`}>
-                        {prettyStatus(experience.status)}
-                      </span>
-                      <span className="status-pill">
-                        {experience.visibilityType === "ALL_MEMBERS"
-                          ? "All Members"
-                          : experience.visibilityType === "SELECTED_MEMBERS"
-                            ? "Selected Members"
-                            : "Invite Only"}
-                      </span>
-                      <span>{seatsLabel(experience)}</span>
-                      <span>{experience.waitlistedCount} waitlisted</span>
-                      <span>{experience.cancellationRequestCount} cancellation requests</span>
-                    </span>
-                    <span className="admin-actions event-row__actions">
-                      <button
-                        type="button"
-                        className="small-button secondary"
-                        onClick={() => setEditingExperienceId(experience.id)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="small-button bronze"
-                        onClick={() =>
-                          setLifecycleTarget({
-                            id: experience.id,
-                            action:
-                              experience.status === "PUBLISHED"
-                                ? "unpublish"
-                                : "publish",
-                          })
-                        }
-                      >
-                        {experience.status === "PUBLISHED"
-                          ? "Unpublish"
-                          : "Publish & Notify"}
-                      </button>
-                      <button
-                        type="button"
-                        className="small-button secondary"
-                        onClick={() =>
-                          setLifecycleTarget({ id: experience.id, action: "postpone" })
-                        }
-                      >
-                        Postpone
-                      </button>
-                      <button
-                        type="button"
-                        className="small-button secondary"
-                        onClick={() =>
-                          setLifecycleTarget({ id: experience.id, action: "cancel" })
-                        }
-                      >
-                        Cancel Event
-                      </button>
-                      <button
-                        type="button"
-                        className="small-button secondary"
-                        onClick={() =>
-                          setLifecycleTarget({ id: experience.id, action: "archive" })
-                        }
-                      >
-                        Archive
-                      </button>
-                      <button
-                        type="button"
-                        className="small-button danger"
-                        onClick={() => setDeleteTargetId(experience.id)}
-                      >
-                        Delete
-                      </button>
-                    </span>
+              <div className="metric-grid event-metric-grid">
+                {eventDashboardCards.map((card) => (
+                  <article className="metric-card" key={card.label}>
+                    <p className="microcopy">{card.label}</p>
+                    <strong>{card.value}</strong>
                   </article>
                 ))}
+              </div>
+              <div className="event-command-bar" aria-label="Event controls">
+                <div className="event-filter-tabs" role="tablist" aria-label="Event status filters">
+                  {eventFilterOptions.map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className={`event-filter-tab ${eventFilter === filter.id ? "is-active" : ""}`}
+                      onClick={() => setEventFilter(filter.id)}
+                    >
+                      <span>{filter.label}</span>
+                      <strong>{filter.count}</strong>
+                    </button>
+                  ))}
+                </div>
+                <label className="field compact-field event-sort-field">
+                  <span>Sort</span>
+                  <select
+                    className="input"
+                    value={eventSort}
+                    onChange={(event) => setEventSort(event.target.value as EventSort)}
+                  >
+                    {eventSortOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="admin-list event-list">
+                {filteredEvents.length ? (
+                  filteredEvents.map((experience) => (
+                    <article className="admin-list-row is-static event-row" key={experience.id}>
+                      <span className="admin-row-main">
+                        <span className="event-row__kicker">
+                          <span
+                            className={`status-pill status-${isNeedsReview(experience) ? "pending" : experience.status.toLowerCase()}`}
+                          >
+                            {eventTimingLabel(experience, eventNow)}
+                          </span>
+                          <span className={`status-pill status-${experience.status.toLowerCase()}`}>
+                            {prettyStatus(experience.status)}
+                          </span>
+                        </span>
+                        <strong>{experience.title}</strong>
+                        <span>
+                          {formatExperienceDate(experience.dateTime)} · {experience.location}
+                        </span>
+                      </span>
+                      <span className="admin-row-meta event-row__meta">
+                        <span className="status-pill">
+                          {experience.visibilityType === "ALL_MEMBERS"
+                            ? "All Members"
+                            : experience.visibilityType === "SELECTED_MEMBERS"
+                              ? "Selected Members"
+                              : "Invite Only"}
+                        </span>
+                        <span>{seatsLabel(experience)}</span>
+                        {experience.announcementSentAt ? (
+                          <span>Announcement sent {compactDate(experience.announcementSentAt)}</span>
+                        ) : (
+                          <span>Announcement not sent</span>
+                        )}
+                      </span>
+                      <div className="event-monitor-grid" aria-label={`${experience.title} registration snapshot`}>
+                        <span className="event-monitor-item">
+                          <small>Joined</small>
+                          <strong>{experience.confirmedCount}</strong>
+                          <em>{experience.requestedCount} pending</em>
+                        </span>
+                        <span className="event-monitor-item">
+                          <small>Open</small>
+                          <strong>{experience.remainingSeats ?? "No cap"}</strong>
+                          <em>{experience.seatsTotal ? `${experience.seatsTotal} seats` : "No cap"}</em>
+                        </span>
+                        <span className="event-monitor-item">
+                          <small>Waitlist</small>
+                          <strong>{experience.waitlistedCount}</strong>
+                          <em>{experience.cancellationRequestCount} cancellations</em>
+                        </span>
+                      </div>
+                      <span className="admin-actions event-row__actions">
+                        <button
+                          type="button"
+                          className="small-button secondary"
+                          onClick={() => setEditingExperienceId(experience.id)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button secondary"
+                          onClick={() => setGuestEventId(experience.id)}
+                        >
+                          View Guests
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button bronze"
+                          onClick={() => setDetailsEventId(experience.id)}
+                        >
+                          Send Details
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button bronze"
+                          onClick={() =>
+                            setLifecycleTarget({
+                              id: experience.id,
+                              action:
+                                experience.status === "PUBLISHED"
+                                  ? "unpublish"
+                                  : "publish",
+                            })
+                          }
+                        >
+                          {experience.status === "PUBLISHED"
+                            ? "Unpublish"
+                            : "Publish & Notify"}
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button secondary"
+                          onClick={() =>
+                            setLifecycleTarget({ id: experience.id, action: "postpone" })
+                          }
+                        >
+                          Postpone
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button secondary"
+                          onClick={() =>
+                            setLifecycleTarget({ id: experience.id, action: "cancel" })
+                          }
+                        >
+                          Cancel Event
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button secondary"
+                          onClick={() =>
+                            setLifecycleTarget({ id: experience.id, action: "archive" })
+                          }
+                        >
+                          Archive
+                        </button>
+                        <button
+                          type="button"
+                          className="small-button danger"
+                          onClick={() => setDeleteTargetId(experience.id)}
+                        >
+                          Delete
+                        </button>
+                      </span>
+                    </article>
+                  ))
+                ) : (
+                  <p className="section-copy">No events match this view.</p>
+                )}
               </div>
             </section>
           ) : null}
@@ -1733,6 +2159,185 @@ export function AdminConsole({
                 </button>
               ) : null}
             </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {guestEvent ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Event guests">
+          <aside className="admin-drawer">
+            <div className="drawer-head">
+              <div>
+                <p className="eyebrow">Event Guests</p>
+                <h2 className="panel-title">{guestEvent.title}</h2>
+              </div>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setGuestEventId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="detail-grid">
+              <p><strong>Confirmed</strong><span>{guestEvent.confirmedCount}</span></p>
+              <p><strong>Pending</strong><span>{guestEvent.requestedCount}</span></p>
+              <p><strong>Waitlisted</strong><span>{guestEvent.waitlistedCount}</span></p>
+              <p><strong>Open seats</strong><span>{guestEvent.remainingSeats ?? "No cap"}</span></p>
+            </div>
+            <div className="drawer-actions">
+              <button
+                type="button"
+                className="small-button bronze"
+                onClick={() => {
+                  setDetailsEventId(guestEvent.id);
+                  setGuestEventId(null);
+                }}
+              >
+                Send Details
+              </button>
+            </div>
+            <div className="drawer-section">
+              {guestEvent.attendees.length ? (
+                <div className="guest-status-list">
+                  {RESERVATION_STATUS_GROUPS.map((status) => {
+                    const attendees = guestEvent.attendees.filter(
+                      (attendee) => attendee.status === status,
+                    );
+
+                    if (!attendees.length) return null;
+
+                    return (
+                      <section className="guest-status-group" key={status}>
+                        <h3>{prettyStatus(status)}</h3>
+                        <div className="guest-list">
+                          {attendees.map((attendee) => (
+                            <article className="guest-row" key={attendee.id}>
+                              <span>
+                                <strong>{attendee.memberName}</strong>
+                                <em>{attendee.memberEmail}</em>
+                              </span>
+                              <span>
+                                {attendee.cancellationReason
+                                  ? attendee.cancellationReason
+                                  : compactDate(attendee.createdAt)}
+                              </span>
+                            </article>
+                          ))}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="section-copy">No one has registered for this event yet.</p>
+              )}
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {detailsEvent ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Send event details">
+          <aside className="admin-drawer wide-drawer">
+            <div className="drawer-head">
+              <div>
+                <p className="eyebrow">Email Details</p>
+                <h2 className="panel-title">{detailsEvent.title}</h2>
+              </div>
+              <button
+                type="button"
+                className="small-button secondary"
+                onClick={() => setDetailsEventId(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="detail-grid">
+              <p><strong>When</strong><span>{formatExperienceDate(detailsEvent.dateTime)}</span></p>
+              <p><strong>Where</strong><span>{detailsEvent.location}</span></p>
+              <p><strong>Confirmed</strong><span>{detailsEvent.confirmedCount}</span></p>
+              <p><strong>Pending</strong><span>{detailsEvent.requestedCount}</span></p>
+            </div>
+            <form className="field-grid drawer-form event-details-form" onSubmit={sendEventDetails}>
+              <fieldset className="field full-field event-recipient-field">
+                <legend>Recipients</legend>
+                <div className="choice-grid">
+                  <label className="choice">
+                    <input name="recipientStatuses" type="checkbox" value="CONFIRMED" defaultChecked />
+                    <span>Confirmed ({detailsEvent.confirmedCount})</span>
+                  </label>
+                  <label className="choice">
+                    <input name="recipientStatuses" type="checkbox" value="REQUESTED" />
+                    <span>Pending ({detailsEvent.requestedCount})</span>
+                  </label>
+                  <label className="choice">
+                    <input name="recipientStatuses" type="checkbox" value="WAITLISTED" />
+                    <span>Waitlist ({detailsEvent.waitlistedCount})</span>
+                  </label>
+                  <label className="choice">
+                    <input name="recipientStatuses" type="checkbox" value="CANCELLATION_REQUESTED" />
+                    <span>Cancellations ({detailsEvent.cancellationRequestCount})</span>
+                  </label>
+                </div>
+              </fieldset>
+              <label className="field full-field">
+                <span>Subject</span>
+                <input
+                  name="subject"
+                  className="input"
+                  defaultValue={`Details for ${detailsEvent.title}`}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Meeting point</span>
+                <input
+                  name="meetingPoint"
+                  className="input"
+                  defaultValue={detailsEvent.location}
+                  required
+                />
+              </label>
+              <label className="field">
+                <span>Arrival window</span>
+                <input name="arrivalWindow" className="input" placeholder="Example: 10 minutes before start" />
+              </label>
+              <label className="field full-field">
+                <span>Location notes</span>
+                <textarea
+                  name="locationDetails"
+                  className="textarea"
+                  placeholder="Exact address, landmark, parking, entry instructions"
+                />
+              </label>
+              <label className="field">
+                <span>Dress code</span>
+                <input name="dressCode" className="input" />
+              </label>
+              <label className="field">
+                <span>What to bring</span>
+                <input name="whatToBring" className="input" />
+              </label>
+              <label className="field full-field">
+                <span>Contact</span>
+                <input name="contact" className="input" placeholder="Name and phone for event-day coordination" />
+              </label>
+              <label className="field full-field">
+                <span>Note</span>
+                <textarea
+                  name="note"
+                  className="textarea"
+                  placeholder="Anything else they should know before arriving"
+                />
+              </label>
+              <button
+                className="small-button bronze full-field"
+                disabled={isLoading(`experience:${detailsEvent.id}:details`)}
+              >
+                {isLoading(`experience:${detailsEvent.id}:details`) ? "Sending" : "Send details email"}
+              </button>
+            </form>
           </aside>
         </div>
       ) : null}
