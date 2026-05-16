@@ -13,6 +13,41 @@ export function lifecycleFlags(status: EventStatus) {
   };
 }
 
+export async function hasEventLifecycleSchema(prisma: PrismaClient) {
+  try {
+    const [result] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'Experience'
+          AND column_name = 'status'
+      ) AS ready
+    `;
+
+    return Boolean(result?.ready);
+  } catch (error) {
+    console.error("event lifecycle schema check failed", error);
+    return false;
+  }
+}
+
+export async function hasFeedbackSchema(prisma: PrismaClient) {
+  try {
+    const [result] = await prisma.$queryRaw<Array<{ ready: boolean }>>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_name = 'FeedbackThread'
+      ) AS ready
+    `;
+
+    return Boolean(result?.ready);
+  } catch (error) {
+    console.error("feedback schema check failed", error);
+    return false;
+  }
+}
+
 export function statusFromLegacyFlags(input: {
   status?: EventStatus | null;
   isVisible: boolean;

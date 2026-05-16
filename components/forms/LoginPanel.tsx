@@ -46,12 +46,15 @@ export function LoginPanel({ status }: LoginPanelProps) {
   return (
     <form className="form-panel" onSubmit={onSubmit}>
       <div className="field-grid">
-        <p className="eyebrow">Approved members</p>
+        <Link className="microcopy back-link" href="/">
+          Back to home
+        </Link>
+        <p className="eyebrow">Member sign in</p>
         <h1 className="section-title">
-          Enter with <em>email.</em>
+          Welcome <em>back.</em>
         </h1>
         <p className="section-copy">
-          Use the email address that was approved for The Curated Life.
+          Sign in with the approved email address for your Curated Life account.
         </p>
         <div className="field">
           <label htmlFor="email">Email</label>
@@ -75,9 +78,6 @@ export function LoginPanel({ status }: LoginPanelProps) {
         <div className="cta-row" style={{ marginTop: 0 }}>
           <Link className="microcopy" href="/forgot-password">
             Forgot password?
-          </Link>
-          <Link className="microcopy" href="/request-access">
-            Request access
           </Link>
         </div>
         <p className="form-status" role="status">

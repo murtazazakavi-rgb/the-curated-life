@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { parseIndiaDateTimeLocal } from "@/lib/dates/india";
 import { EventStatus } from "@/lib/generated/prisma/enums";
-import { lifecycleFlags, replaceAudienceMembers } from "@/lib/events/lifecycle";
+import {
+  hasEventLifecycleSchema,
+  lifecycleFlags,
+  replaceAudienceMembers,
+} from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 import { experienceAdminSchema } from "@/lib/validators/access";
 
@@ -25,27 +29,63 @@ export async function POST(request: Request) {
   const {
     selectedMemberIds,
     status = EventStatus.DRAFT,
+    visibilityType,
+    attendeeVisibilityEnabled,
     ...data
   } = parsed.data;
   const eventStatus = status as EventStatus;
   const prisma = getPrisma();
+  const lifecycleReady = await hasEventLifecycleSchema(prisma);
+  const statusFlags = lifecycleFlags(eventStatus);
   const experience = await prisma.experience.create({
     data: {
       ...data,
-      status: eventStatus,
-      ...lifecycleFlags(eventStatus),
+      ...statusFlags,
+      ...(lifecycleReady
+        ? {
+            status: eventStatus,
+            visibilityType,
+            attendeeVisibilityEnabled,
+          }
+        : {}),
       hostTitle: data.hostTitle || null,
       hostBio: data.hostBio || null,
       seatsTotal: data.seatsTotal ?? null,
       dateTime: parseIndiaDateTimeLocal(data.dateTime),
     },
-    include: {
-      reservations: { select: { id: true, status: true } },
-      audienceMembers: { select: { userId: true } },
-    },
+    include: lifecycleReady
+      ? {
+          reservations: { select: { id: true, status: true } },
+          audienceMembers: { select: { userId: true } },
+        }
+      : {
+          reservations: { select: { id: true, status: true } },
+        },
   });
 
-  await replaceAudienceMembers(prisma, experience.id, selectedMemberIds);
+  if (lifecycleReady) {
+    await replaceAudienceMembers(prisma, experience.id, selectedMemberIds);
+  }
 
-  return NextResponse.json({ ok: true, experience });
+  const experienceView = experience as typeof experience & {
+    audienceMembers?: Array<{ userId: string }>;
+    status?: EventStatus;
+    visibilityType?: string;
+    attendeeVisibilityEnabled?: boolean;
+  };
+
+  return NextResponse.json({
+    ok: true,
+    experience: {
+      ...experienceView,
+      status: lifecycleReady ? experienceView.status : eventStatus,
+      visibilityType: lifecycleReady ? experienceView.visibilityType : "ALL_MEMBERS",
+      attendeeVisibilityEnabled: lifecycleReady
+        ? experienceView.attendeeVisibilityEnabled
+        : true,
+      selectedMemberIds: lifecycleReady
+        ? (experienceView.audienceMembers ?? []).map((member) => member.userId)
+        : [],
+    },
+  });
 }

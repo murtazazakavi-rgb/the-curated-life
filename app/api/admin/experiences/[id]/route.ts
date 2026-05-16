@@ -16,6 +16,7 @@ import {
 import {
   activeApprovedMembersWhere,
   affectedReservationWhere,
+  hasEventLifecycleSchema,
   lifecycleFlags,
   replaceAudienceMembers,
 } from "@/lib/events/lifecycle";
@@ -41,8 +42,40 @@ export async function PATCH(
   const body = await request.json().catch(() => null);
   const lifecycle = experienceLifecycleSchema.safeParse(body);
   const prisma = getPrisma();
+  const lifecycleReady = await hasEventLifecycleSchema(prisma);
 
   if (lifecycle.success) {
+    if (!lifecycleReady) {
+      const action = lifecycle.data.action;
+      const status =
+        action === "archive"
+          ? EventStatus.ARCHIVED
+          : action === "publish"
+            ? EventStatus.PUBLISHED
+            : EventStatus.DRAFT;
+      const experience = await prisma.experience.update({
+        where: { id },
+        data:
+          action === "postpone" || action === "cancel"
+            ? { isVisible: false, isArchived: false }
+            : lifecycleFlags(status),
+        include: {
+          reservations: { select: { id: true, status: true } },
+        },
+      });
+
+      return NextResponse.json({
+        ok: true,
+        experience: {
+          ...experience,
+          status,
+          visibilityType: "ALL_MEMBERS",
+          attendeeVisibilityEnabled: true,
+          selectedMemberIds: [],
+        },
+      });
+    }
+
     const current = await prisma.experience.findUnique({
       where: { id },
       include: {
@@ -242,14 +275,26 @@ export async function PATCH(
     return NextResponse.json({ error: "Please review the experience details." }, { status: 400 });
   }
 
-  const { selectedMemberIds, status, ...data } = parsed.data;
+  const {
+    selectedMemberIds,
+    status,
+    visibilityType,
+    attendeeVisibilityEnabled,
+    ...data
+  } = parsed.data;
   const statusFlags = status ? lifecycleFlags(status as EventStatus) : {};
   await prisma.experience.update({
     where: { id },
     data: {
       ...data,
       ...statusFlags,
-      status: status as EventStatus | undefined,
+      ...(lifecycleReady
+        ? {
+            status: status as EventStatus | undefined,
+            visibilityType,
+            attendeeVisibilityEnabled,
+          }
+        : {}),
       dateTime: data.dateTime ? parseIndiaDateTimeLocal(data.dateTime) : undefined,
       hostTitle: data.hostTitle === "" ? null : data.hostTitle,
       hostBio: data.hostBio === "" ? null : data.hostBio,
@@ -257,16 +302,45 @@ export async function PATCH(
     },
   });
 
-  await replaceAudienceMembers(prisma, id, selectedMemberIds);
+  if (lifecycleReady) {
+    await replaceAudienceMembers(prisma, id, selectedMemberIds);
+  }
+
   const experience = await prisma.experience.findUniqueOrThrow({
     where: { id },
-    include: {
-      reservations: { select: { id: true, status: true } },
-      audienceMembers: { select: { userId: true } },
-    },
+    include: lifecycleReady
+      ? {
+          reservations: { select: { id: true, status: true } },
+          audienceMembers: { select: { userId: true } },
+        }
+      : {
+          reservations: { select: { id: true, status: true } },
+        },
   });
 
-  return NextResponse.json({ ok: true, experience });
+  const experienceView = experience as typeof experience & {
+    audienceMembers?: Array<{ userId: string }>;
+    status?: EventStatus;
+    visibilityType?: string;
+    attendeeVisibilityEnabled?: boolean;
+  };
+
+  return NextResponse.json({
+    ok: true,
+    experience: {
+      ...experienceView,
+      status: lifecycleReady
+        ? experienceView.status
+        : status ?? (experience.isArchived ? EventStatus.ARCHIVED : experience.isVisible ? EventStatus.PUBLISHED : EventStatus.DRAFT),
+      visibilityType: lifecycleReady ? experienceView.visibilityType : "ALL_MEMBERS",
+      attendeeVisibilityEnabled: lifecycleReady
+        ? experienceView.attendeeVisibilityEnabled
+        : true,
+      selectedMemberIds: lifecycleReady
+        ? (experienceView.audienceMembers ?? []).map((member) => member.userId)
+        : [],
+    },
+  });
 }
 
 export async function DELETE(

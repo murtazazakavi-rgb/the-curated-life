@@ -151,6 +151,36 @@
   color: var(--ink);
 }
 
+.admin-sidebar-actions,
+.member-card__actions {
+  display: grid;
+  gap: 8px;
+}
+
+.on-dark-action {
+  width: 100%;
+  border-color: rgba(245, 241, 234, 0.24) !important;
+  color: var(--cream) !important;
+  text-align: center;
+}
+
+.login-page {
+  display: grid;
+  align-items: center;
+}
+
+.login-wrap {
+  width: min(100% - 40px, 520px);
+}
+
+.login-wrap .form-panel {
+  padding: clamp(24px, 5vw, 42px);
+}
+
+.back-link {
+  justify-self: start;
+}
+
 .admin-main {
   min-width: 0;
 }

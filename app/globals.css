@@ -661,6 +661,16 @@ img {
   padding: 14px 15px;
 }
 
+select[multiple].input {
+  min-height: 126px;
+  padding: 10px 12px;
+}
+
+select[multiple].input option {
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
 .textarea {
   min-height: 140px;
   resize: vertical;

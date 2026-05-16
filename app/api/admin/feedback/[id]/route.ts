@@ -3,6 +3,7 @@ import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { sendTransactionalEmail } from "@/lib/email/send";
 import { feedbackReplyEmail } from "@/lib/email/templates";
 import { siteUrl } from "@/lib/email/templates/base";
+import { hasFeedbackSchema } from "@/lib/events/lifecycle";
 import { FeedbackStatus } from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
 import { feedbackAdminSchema } from "@/lib/validators/access";
@@ -28,6 +29,18 @@ export async function PATCH(
 
   const { id } = await context.params;
   const prisma = getPrisma();
+  const feedbackReady = await hasFeedbackSchema(prisma);
+
+  if (!feedbackReady) {
+    return NextResponse.json(
+      {
+        error:
+          "Feedback replies will be available once the latest update finishes.",
+      },
+      { status: 503 },
+    );
+  }
+
   const thread = await prisma.feedbackThread.findUnique({
     where: { id },
     include: { user: true },

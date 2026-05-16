@@ -4,6 +4,7 @@ import { getAuthorizedMember } from "@/lib/auth/server";
 import { sendTransactionalEmail } from "@/lib/email/send";
 import { adminFeedbackReceivedEmail } from "@/lib/email/templates";
 import { siteUrl } from "@/lib/email/templates/base";
+import { hasFeedbackSchema } from "@/lib/events/lifecycle";
 import { getPrisma } from "@/lib/prisma/client";
 import { feedbackCreateSchema } from "@/lib/validators/access";
 
@@ -27,6 +28,18 @@ export async function POST(request: Request) {
   }
 
   const prisma = getPrisma();
+  const feedbackReady = await hasFeedbackSchema(prisma);
+
+  if (!feedbackReady) {
+    return NextResponse.json(
+      {
+        error:
+          "Member notes will be available once the latest update finishes.",
+      },
+      { status: 503 },
+    );
+  }
+
   const thread = await prisma.feedbackThread.create({
     data: {
       userId: member.id,

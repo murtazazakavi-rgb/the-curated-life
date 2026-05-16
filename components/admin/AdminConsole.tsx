@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 import { formatIndiaDateTimeLocal } from "@/lib/dates/india";
 import { formatExperienceDate } from "@/lib/data/experiences";
@@ -639,6 +640,13 @@ export function AdminConsole({
     }
   }
 
+  async function signOut() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+    });
+    window.location.href = "/login";
+  }
+
   async function reviewRequest(id: string, action: AccessAction) {
     const key = `request:${id}:${action}`;
     const payload = await runJson<{ status: string }>(
@@ -975,6 +983,18 @@ export function AdminConsole({
               </button>
             ))}
           </nav>
+          <div className="admin-sidebar-actions">
+            <Link className="small-button secondary on-dark-action" href="/">
+              View Site
+            </Link>
+            <button
+              className="small-button secondary on-dark-action"
+              type="button"
+              onClick={signOut}
+            >
+              Logout
+            </button>
+          </div>
         </aside>
 
         <div className="admin-main">

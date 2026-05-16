@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, type FormEvent } from "react";
 import { formatExperienceDate } from "@/lib/data/experiences";
 
@@ -281,9 +282,14 @@ export function MemberDashboard({
               <p className="member-card__meta">
                 Access holder · Email verified · Private invitations
               </p>
-              <button className="btn btn--cream btn--full" type="button" onClick={signOut}>
-                Sign Out
-              </button>
+              <div className="member-card__actions">
+                <Link className="btn btn--ghost-light btn--full" href="/">
+                  Back to Home
+                </Link>
+                <button className="btn btn--cream btn--full" type="button" onClick={signOut}>
+                  Logout
+                </button>
+              </div>
             </div>
           </aside>
         </div>
