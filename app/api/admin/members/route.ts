@@ -4,7 +4,10 @@ import { createPasswordSetupTokenWithClient } from "@/lib/auth/password";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { directMemberSetPasswordEmail } from "@/lib/email/templates";
 import { siteUrl } from "@/lib/email/templates/base";
-import { sendTransactionalEmail } from "@/lib/email/send";
+import {
+  sendTransactionalEmail,
+  type EmailDeliveryResult,
+} from "@/lib/email/send";
 import { getTableColumns, hasPasswordSetupSchema } from "@/lib/events/lifecycle";
 import { AccessStatus, UserRole } from "@/lib/generated/prisma/enums";
 import { getPrisma } from "@/lib/prisma/client";
@@ -23,6 +26,14 @@ type MemberRecord = {
   createdAt: Date;
 };
 
+type SetupEmailDelivery =
+  | EmailDeliveryResult
+  | {
+      status: "failed";
+      provider: "unknown";
+      message: string;
+    };
+
 function serializeMember(member: MemberRecord) {
   return {
     id: member.id,
@@ -33,6 +44,14 @@ function serializeMember(member: MemberRecord) {
     passwordSetAt: member.passwordSetAt?.toISOString() ?? null,
     suspendedAt: member.suspendedAt?.toISOString() ?? null,
     createdAt: member.createdAt.toISOString(),
+  };
+}
+
+function failedSetupEmailDelivery(): SetupEmailDelivery {
+  return {
+    status: "failed",
+    provider: "unknown",
+    message: "Setup email could not be sent. Check your email provider settings.",
   };
 }
 
@@ -150,17 +169,19 @@ export async function POST(request: Request) {
       setupUrl: siteUrl(`/set-password?token=${encodeURIComponent(setupToken)}`),
     });
 
-    await sendTransactionalEmail({
+    const setupEmailDelivery = await sendTransactionalEmail({
       to: member.email,
       templateKey: "direct_member_set_password",
       ...email,
     }).catch((error) => {
       console.error("direct_member_set_password email failed", error);
+      return failedSetupEmailDelivery();
     });
 
     return NextResponse.json({
       ok: true,
       member: serializeMember(member),
+      setupEmailDelivery,
     });
   } catch (error) {
     console.error("direct member create failed", error);

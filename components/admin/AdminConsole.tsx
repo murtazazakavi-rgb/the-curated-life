@@ -155,6 +155,12 @@ type Toast = {
   message: string;
 } | null;
 
+type SetupEmailDeliveryView = {
+  status: "sent" | "skipped" | "failed";
+  provider: string;
+  message?: string;
+} | null;
+
 type AccessAction = "approve" | "decline" | "waitlist" | "resend_setup";
 
 type ExperiencePayload = {
@@ -304,6 +310,47 @@ function prettyStatus(value: string) {
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function deliveryProviderSuffix(delivery?: SetupEmailDeliveryView) {
+  if (!delivery || delivery.status !== "sent") return "";
+  if (delivery.provider === "resend") return " via Resend";
+  if (delivery.provider === "smtp") return " via SMTP";
+  return "";
+}
+
+function lowerFirst(value: string) {
+  return value ? `${value.charAt(0).toLowerCase()}${value.slice(1)}` : value;
+}
+
+function setupEmailToast(
+  delivery: SetupEmailDeliveryView | undefined,
+  messages: {
+    sent: string;
+    skipped: string;
+    failedPrefix: string;
+  },
+): Exclude<Toast, null> {
+  if (!delivery || delivery.status === "sent") {
+    return {
+      tone: "success",
+      message: `${messages.sent}${deliveryProviderSuffix(delivery)}.`,
+    };
+  }
+
+  if (delivery.status === "skipped") {
+    return {
+      tone: "error",
+      message: messages.skipped,
+    };
+  }
+
+  return {
+    tone: "error",
+    message: `${messages.failedPrefix} ${lowerFirst(
+      delivery.message ?? "setup email could not be sent.",
+    )}`,
+  };
 }
 
 function compactDate(value: string) {
@@ -650,7 +697,11 @@ export function AdminConsole({
 
   async function reviewRequest(id: string, action: AccessAction) {
     const key = `request:${id}:${action}`;
-    const payload = await runJson<{ status: string; member?: MemberView | null }>(
+    const payload = await runJson<{
+      status: string;
+      member?: MemberView | null;
+      setupEmailDelivery?: SetupEmailDeliveryView;
+    }>(
       key,
       `/api/admin/access-requests/${id}`,
       {
@@ -694,11 +745,31 @@ export function AdminConsole({
       });
     }
 
+    if (action === "resend_setup") {
+      const nextToast = setupEmailToast(payload.setupEmailDelivery, {
+        sent: "Password setup email resent",
+        skipped:
+          "Setup email was skipped because no email provider is configured.",
+        failedPrefix: "Setup email was not resent because",
+      });
+      showToast(nextToast.tone, nextToast.message);
+      return;
+    }
+
+    if (payload.status === "APPROVED") {
+      const nextToast = setupEmailToast(payload.setupEmailDelivery, {
+        sent: "Access approved and setup email sent",
+        skipped:
+          "Access approved, but setup email was skipped because no email provider is configured.",
+        failedPrefix: "Access approved, but",
+      });
+      showToast(nextToast.tone, nextToast.message);
+      return;
+    }
+
     showToast(
       "success",
-      action === "resend_setup"
-        ? "Password setup email resent."
-        : `Access request ${prettyStatus(payload.status).toLowerCase()}.`,
+      `Access request ${prettyStatus(payload.status).toLowerCase()}.`,
     );
   }
 
@@ -751,7 +822,10 @@ export function AdminConsole({
       email: fieldValue(formData, "email"),
       role: fieldValue(formData, "role"),
     };
-    const body = await runJson<{ member: MemberView }>(
+    const body = await runJson<{
+      member: MemberView;
+      setupEmailDelivery?: SetupEmailDeliveryView;
+    }>(
       "member:add",
       "/api/admin/members",
       {
@@ -777,7 +851,13 @@ export function AdminConsole({
     });
     form.reset();
     setIsAddingMember(false);
-    showToast("success", "Member added and setup email sent.");
+    const nextToast = setupEmailToast(body.setupEmailDelivery, {
+      sent: "Member added and setup email sent",
+      skipped:
+        "Member added, but setup email was skipped because no email provider is configured.",
+      failedPrefix: "Member added, but",
+    });
+    showToast(nextToast.tone, nextToast.message);
   }
 
   async function deleteMember(id: string) {

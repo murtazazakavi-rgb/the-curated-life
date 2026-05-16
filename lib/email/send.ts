@@ -11,6 +11,12 @@ type SendEmailInput = {
   text: string;
 };
 
+export type EmailDeliveryResult = {
+  status: "sent" | "skipped";
+  provider: "resend" | "smtp" | "none";
+  messageId?: string;
+};
+
 let transporter: nodemailer.Transporter<SMTPTransport.SentMessageInfo> | null = null;
 
 function getTransporter() {
@@ -46,23 +52,99 @@ async function logEmail(input: {
   }
 }
 
-export async function sendTransactionalEmail(input: SendEmailInput) {
-  const hasSmtp =
-    process.env.SMTP_HOST &&
-    process.env.SMTP_USER &&
-    process.env.SMTP_PASSWORD &&
-    process.env.EMAIL_FROM;
+function hasResendConfig() {
+  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+}
 
-  if (!hasSmtp) {
+function hasSmtpConfig() {
+  return Boolean(
+    process.env.SMTP_HOST &&
+      process.env.SMTP_USER &&
+      process.env.SMTP_PASSWORD &&
+      process.env.EMAIL_FROM,
+  );
+}
+
+function resendErrorMessage(payload: unknown, status: number) {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+
+    if (typeof record.message === "string") return record.message;
+    if (typeof record.error === "string") return record.error;
+    if (typeof record.name === "string") return record.name;
+  }
+
+  return `Resend API request failed with status ${status}.`;
+}
+
+function parseResendPayload(responseText: string) {
+  if (!responseText) return {};
+
+  try {
+    return JSON.parse(responseText) as Record<string, unknown>;
+  } catch {
+    return { message: responseText };
+  }
+}
+
+async function sendWithResend(input: SendEmailInput) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      text: input.text,
+    }),
+  });
+  const responseText = await response.text();
+  const payload = parseResendPayload(responseText);
+
+  if (!response.ok) {
+    throw new Error(resendErrorMessage(payload, response.status));
+  }
+
+  if (typeof payload.id !== "string") {
+    throw new Error("Resend did not return an email id.");
+  }
+
+  return { messageId: payload.id };
+}
+
+export async function sendTransactionalEmail(input: SendEmailInput) {
+  if (!hasResendConfig() && !hasSmtpConfig()) {
     await logEmail({
       toEmail: input.to,
       templateKey: input.templateKey,
       status: EmailStatus.SKIPPED,
     });
-    return { skipped: true };
+
+    return { status: "skipped", provider: "none" } satisfies EmailDeliveryResult;
   }
 
   try {
+    if (hasResendConfig()) {
+      const result = await sendWithResend(input);
+
+      await logEmail({
+        toEmail: input.to,
+        templateKey: input.templateKey,
+        status: EmailStatus.SENT,
+        providerMessageId: result.messageId,
+      });
+
+      return {
+        status: "sent",
+        provider: "resend",
+        messageId: result.messageId,
+      } satisfies EmailDeliveryResult;
+    }
+
     const result = await getTransporter().sendMail({
       from: process.env.EMAIL_FROM,
       to: input.to,
@@ -78,7 +160,11 @@ export async function sendTransactionalEmail(input: SendEmailInput) {
       providerMessageId: result.messageId,
     });
 
-    return { messageId: result.messageId };
+    return {
+      status: "sent",
+      provider: "smtp",
+      messageId: result.messageId,
+    } satisfies EmailDeliveryResult;
   } catch (error) {
     await logEmail({
       toEmail: input.to,

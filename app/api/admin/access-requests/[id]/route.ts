@@ -7,7 +7,10 @@ import {
 import { isAdminEmail } from "@/lib/admin/access";
 import { getAuthorizedAdmin } from "@/lib/auth/server";
 import { createPasswordSetupTokenWithClient } from "@/lib/auth/password";
-import { sendTransactionalEmail } from "@/lib/email/send";
+import {
+  sendTransactionalEmail,
+  type EmailDeliveryResult,
+} from "@/lib/email/send";
 import { siteUrl } from "@/lib/email/templates/base";
 import {
   AccessStatus,
@@ -36,6 +39,14 @@ type ReviewedMember = {
   createdAt: Date;
 };
 
+type SetupEmailDelivery =
+  | EmailDeliveryResult
+  | {
+      status: "failed";
+      provider: "unknown";
+      message: string;
+    };
+
 function serializeMember(member: ReviewedMember | null) {
   if (!member) return null;
 
@@ -48,6 +59,14 @@ function serializeMember(member: ReviewedMember | null) {
     passwordSetAt: member.passwordSetAt?.toISOString() ?? null,
     suspendedAt: member.suspendedAt?.toISOString() ?? null,
     createdAt: member.createdAt.toISOString(),
+  };
+}
+
+function failedSetupEmailDelivery(): SetupEmailDelivery {
+  return {
+    status: "failed",
+    provider: "unknown",
+    message: "Setup email could not be sent. Check your email provider settings.",
   };
 }
 
@@ -144,6 +163,7 @@ export async function PATCH(
 
     let setupToken: string | null = null;
     let reviewedMember: ReviewedMember | null = null;
+    let setupEmailDelivery: SetupEmailDelivery | null = null;
 
     const accessRequest = await prisma.$transaction(async (tx) => {
       const nextRequest =
@@ -270,7 +290,7 @@ export async function PATCH(
         experiences: liveExperiences,
       });
 
-      await sendTransactionalEmail({
+      setupEmailDelivery = await sendTransactionalEmail({
         to: accessRequest.email,
         templateKey:
           parsed.data.action === "resend_setup"
@@ -279,6 +299,7 @@ export async function PATCH(
         ...email,
       }).catch((error) => {
         console.error("access_approved_set_password email failed", error);
+        return failedSetupEmailDelivery();
       });
     }
 
@@ -308,6 +329,7 @@ export async function PATCH(
       ok: true,
       status,
       member: serializeMember(reviewedMember),
+      setupEmailDelivery,
     });
   } catch (error) {
     console.error("access request review failed", error);
